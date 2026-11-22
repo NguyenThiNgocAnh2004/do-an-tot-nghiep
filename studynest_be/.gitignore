@@ -1,0 +1,12 @@
+app/core/secret/token.json
+app/core/secret/client_secret.json
+app/core/secret/*.json
+venv/
+.venv/
+token.json
+token.json
+
+token.json
+credentials.json
+*.pem
+.env

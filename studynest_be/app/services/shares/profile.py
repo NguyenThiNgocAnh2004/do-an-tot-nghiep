@@ -1,0 +1,129 @@
+import uuid
+
+from fastapi import Depends, HTTPException, UploadFile
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.database import User
+from app.db.sesson import get_session
+from app.schemas.user.profile import ProfileUpdate
+from app.services.shares.file_storage import (
+    FileStorageService,
+    get_file_storage_service,
+)
+
+
+class ProfileService:
+    def __init__(
+        self,
+        db: AsyncSession = Depends(get_session),
+        storage_service: FileStorageService = Depends(
+            get_file_storage_service
+        ),
+    ):
+        self.db = db
+        self.storage_service = storage_service
+
+    async def get_profile_by_user_id(self, user_id: uuid.UUID, is_me: bool = False):
+        try:
+            query = (
+                select(
+                    User.id,
+                    User.fullname,
+                    User.email,
+                    User.avatar,
+                    User.bio,
+                    User.facebook_url,
+                    is_me and User.birthday or None,
+                    User.conscious,
+                    is_me and User.district or None,
+                    is_me and User.citizenship_identity or None,
+                    User.last_login_at,
+                    User.create_at.label("created_at"),
+                    User.update_at.label("updated_at"),
+                    User.instructor_description,
+                    User.paypal_email,
+                    User.paypal_payer_id,
+                )
+                .where(User.id == user_id)
+                .limit(1)
+            )
+
+            result = await self.db.execute(query)
+            user = result.mappings().first()
+            if not user:
+                raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+
+            return user
+        except Exception as e:
+
+            raise HTTPException(status_code=500, detail=f"error {e}")
+
+    async def upload_avatar_async(self, user_id: uuid.UUID, file: UploadFile):
+        # Implementation to get user profile by user_id
+        try:
+            user = await self.db.get(User, user_id)
+            if not user:
+                raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+
+            file_url = await self.storage_service.upload_file(
+                ["avatars", str(user_id)],
+                file.filename or "avatar.png",
+                await file.read(),
+                file.content_type,
+            )
+            user.avatar = file_url["url"]
+            await self.db.commit()
+            return {
+                "id": user.id,
+                "avatar": user.avatar,
+            }
+        except Exception as e:
+
+            raise HTTPException(status_code=500, detail=f"error {e}")
+
+    async def update_profile_by_user_id(
+        self, user_id: uuid.UUID, profile_data: ProfileUpdate
+    ):
+        user = await self.db.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+
+        # cập nhật tự động theo field được gửi (tránh viết thủ công từng cái)
+        for field, value in profile_data.model_dump(exclude_unset=True).items():
+            setattr(user, field, value)
+
+        try:
+            await self.db.commit()
+            await self.db.refresh(user)
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(status_code=500, detail=f"Lỗi khi cập nhật hồ sơ: {e}")
+
+        return {
+            "id": user.id,
+            "fullname": user.fullname,
+            "email": user.email,
+            "avatar": user.avatar,
+            "bio": user.bio,
+            "facebook_url": user.facebook_url,
+            "birthday": user.birthday,
+            "conscious": user.conscious,
+            "district": user.district,
+            "citizenship_identity": user.citizenship_identity,
+            "is_verified_email": bool(user.is_verified_email),
+            "email_verified_at": user.email_verified_at if user.is_verified_email else None,
+            "is_banned": bool(user.is_banned),
+            "banned_reason": user.banned_reason,
+            "banned_until": user.banned_until,
+            "last_login_at": user.last_login_at,
+            "preferences_str": user.preferences_str,
+            "learning_goals": user.learning_goals,
+            "daily_goal_minutes": user.daily_goal_minutes,
+            "preferred_learning_style": user.preferred_learning_style,
+            "paypal_email": user.paypal_email,
+            "paypal_payer_id": user.paypal_payer_id,
+            "paypal_raw_payer_id": user.paypal_payer_id,
+            "created_at": user.create_at,
+            "updated_at": user.update_at,
+        }
