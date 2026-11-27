@@ -15,15 +15,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 import {
   ArrowLeft,
+  Bot,
   Check,
   GraduationCap,
   Pencil,
   Plus,
-  Sparkles,
   Trash2,
   X,
   Zap,
-} from "lucide-react";
+} from "pulsoicon-react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -512,7 +512,6 @@ const QuizzesLesson = () => {
                       disabled={isGeneratingAI || !lessonId}
                       isLoading={isGeneratingAI}
                       loadingText="Đang tạo..."
-                      leftIcon={<Sparkles className="h-4 w-4" />}
                       title="Tạo quiz bằng AI"
                     >
                       Tạo bằng AI
@@ -550,6 +549,7 @@ const QuizzesLesson = () => {
                       </div>
                       {quizzes.length > 1 && (
                         <button
+                          aria-label="Xóa quiz"
                           onClick={() => removeQuiz(quizIndex)}
                           className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive-bg rounded-lg transition-colors"
                           title="Xóa quiz"
@@ -724,6 +724,7 @@ const QuizzesLesson = () => {
                                 {/* Remove Button */}
                                 {quiz.options.length > 2 && (
                                   <button
+                                    aria-label="Xóa phương án"
                                     onClick={() =>
                                       removeOption(quizIndex, optionIndex)
                                     }
@@ -739,7 +740,7 @@ const QuizzesLesson = () => {
                               {option.is_correct && (
                                 <div className="mt-2">
                                   <Badge variant="success" size="sm">
-                                    <Check className="h-3 w-3 mr-1 inline" />
+                                    <Check animated={false} className="h-3 w-3 mr-1 inline" />
                                     Đáp án đúng
                                   </Badge>
                                 </div>
@@ -808,7 +809,7 @@ const QuizzesLesson = () => {
             <Card className="bg-surface border border-border rounded-2xl p-6 max-w-md w-full shadow-xl">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 bg-secondary-light text-secondary-foreground rounded-xl flex items-center justify-center">
-                  <Sparkles className="h-5 w-5" />
+                  <Bot className="h-5 w-5" aria-hidden="true" />
                 </div>
                 <h3 className="text-lg font-bold font-display text-foreground">
                   Tạo quiz bằng AI
@@ -950,6 +951,7 @@ const QuizzesLesson = () => {
                           </div>
                           <div className="flex items-start gap-1 ml-2">
                             <button
+                              aria-label="Chỉnh sửa"
                               onClick={() => handleEditQuiz(quiz)}
                               className="p-2 text-muted-foreground hover:text-primary hover:bg-primary-light/50 rounded-lg transition-colors"
                               title="Chỉnh sửa"
@@ -957,6 +959,7 @@ const QuizzesLesson = () => {
                               <Pencil className="h-4 w-4" />
                             </button>
                             <button
+                              aria-label="Xóa"
                               onClick={() => handleDeleteQuiz(quiz.id)}
                               disabled={deletingQuiz === quiz.id}
                               className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive-bg rounded-lg transition-colors disabled:opacity-50"
@@ -989,9 +992,9 @@ const QuizzesLesson = () => {
                                   }`}
                                 >
                                   {option.is_correct ? (
-                                    <Check className="h-3 w-3" />
+                                    <Check animated={false} className="h-3 w-3" />
                                   ) : (
-                                    <X className="h-3 w-3" />
+                                    <X animated={false} className="h-3 w-3" />
                                   )}
                                 </div>
                                 <div className="flex-1">

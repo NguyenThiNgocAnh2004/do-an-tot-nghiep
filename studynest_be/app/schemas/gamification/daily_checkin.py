@@ -32,11 +32,16 @@ class RewardDTO(BaseModel):
 class CalendarDayDTO(BaseModel):
     """Thông tin một ngày trong lịch check-in."""
 
-    day_number: int = Field(..., description="Ngày trong chu kỳ (1-based)")
+    day_number: int = Field(..., description="Ngày trong chu kỳ (1-based; 1=Thứ 2 .. 7=Chủ nhật)")
+    calendar_date: Optional[datetime.date] = Field(
+        None, description="Ngày dương lịch thực tế của ô này"
+    )
     checkin_date: Optional[datetime.date] = Field(
         None, description="Ngày đã check-in (None nếu chưa)"
     )
     is_checked: bool = Field(False, description="Đã check-in ngày này chưa")
+    is_today: bool = Field(False, description="Có phải ngày hôm nay không")
+    is_missed: bool = Field(False, description="Đã qua ngày nhưng chưa điểm danh")
     reward: Optional[RewardDTO] = Field(None, description="Phần thưởng của ngày này")
 
 
@@ -60,7 +65,7 @@ class CheckinStatusResponse(BaseModel):
         default_factory=list, description="Lịch check-in của chu kỳ hiện tại"
     )
     current_peak_balance: int = Field(
-        ..., description="Số dư Peak Wallet hiện tại"
+        ..., description="Số dư Coin hiện tại"
     )
 
 
@@ -76,7 +81,7 @@ class CheckinClaimResponse(BaseModel):
     message: str = Field(..., description="Thông báo kết quả")
     current_day: int = Field(..., description="Ngày trong chu kỳ vừa check-in (1-based)")
     reward: Optional[RewardDTO] = Field(None, description="Phần thưởng vừa nhận")
-    current_peak_balance: int = Field(..., description="Số dư Peak Wallet sau khi nhận")
+    current_peak_balance: int = Field(..., description="Số dư Coin sau khi nhận")
     current_streak: int = Field(..., description="Chuỗi streak sau khi check-in")
     best_streak: int = Field(..., description="Chuỗi streak cao nhất")
     calendar: list[CalendarDayDTO] = Field(

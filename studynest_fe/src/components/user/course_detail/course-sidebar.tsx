@@ -1,4 +1,5 @@
 "use client";
+import { CoinPrice } from "@/components/ui";
 
 import api from "@/lib/utils/fetcher/client/axios";
 import { showToast } from "@/lib/utils/helpers/toast";
@@ -13,17 +14,17 @@ import { Course } from "@/types/user/course_detail";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
-  HiAcademicCap,
-  HiBookOpen,
-  HiCheckCircle,
-  HiClock,
-  HiGlobe,
-  HiHeart,
-  HiPlay,
-  HiShare,
-  HiShoppingCart,
-  HiCloud,
-} from "react-icons/hi";
+  GraduationCap,
+  BookOpen,
+  CircleCheck,
+  Clock,
+  Earth,
+  Heart,
+  CirclePlay,
+  Share2,
+  ShoppingCart,
+  Cloud,
+} from "pulsoicon-react";
 import EnrollmentModal from "./enrollment-modal";
 
 const DiscountEffect = ({ active = false }: { active?: boolean }) => {
@@ -123,7 +124,16 @@ export default function CourseSidebar({
         setAvailableDiscounts(discounts);
 
         if (discounts.length > 0 && isInitialLoadRef.current) {
-          const firstDiscountCode = discounts[0].discount_code;
+          const calcSaving = (d: AvailableDiscount) =>
+            d.discount_type === "percent"
+              ? (course.base_price * (d.percent_value ?? 0)) / 100
+              : (d.fixed_value ?? 0);
+          const bestDiscount = discounts.reduce(
+            (best: AvailableDiscount, cur: AvailableDiscount) =>
+              calcSaving(cur) > calcSaving(best) ? cur : best,
+            discounts[0],
+          );
+          const firstDiscountCode = bestDiscount.discount_code;
           setDiscountInput(firstDiscountCode);
           isInitialLoadRef.current = false;
 
@@ -401,7 +411,10 @@ export default function CourseSidebar({
                 redirectToLearning();
               }, 1500);
             } else if (transaction_id) {
-              const redirectUrl = `/transaction?status=success&order_id=${transaction_id}&redirect=/learning/${courseSlug}`;
+              const params = new URLSearchParams({
+                status: "success", order_id: transaction_id, redirect: `/learning/${courseSlug}`,
+              });
+              const redirectUrl = `/transaction?${params}`;
               if (typeof window !== "undefined") {
                 window.location.replace(redirectUrl);
               } else {
@@ -501,26 +514,18 @@ export default function CourseSidebar({
               </span>
               {hasPrice ? (
                 discountAmount > 0 && isDiscountApplied ? (
-                  <div className="flex flex-wrap items-baseline gap-2.5">
-                    <span className="text-3xl font-bold text-primary">
-                      {formatPrice(displayPrice, course.currency)}
-                    </span>
-                    <span className="text-sm text-subtle-foreground line-through">
-                      {formatPrice(course.base_price, course.currency)}
-                    </span>
-                    <span className="text-xs text-success-foreground bg-success-bg px-2.5 py-0.5 rounded-full font-semibold">
-                      Tiết kiệm {formatPrice(discountAmount, course.currency)}
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <CoinPrice
+                      priceVnd={displayPrice}
+                      originalPriceVnd={course.base_price}
+                      size="lg"
+                    />
                   </div>
                 ) : (
-                  <div className="text-3xl font-bold text-foreground">
-                    {formatPrice(course.base_price, course.currency)}
-                  </div>
+                  <CoinPrice priceVnd={course.base_price} size="lg" />
                 )
               ) : (
-                <div className="text-3xl font-bold text-primary">
-                  {formatPrice(course.base_price, course.currency)}
-                </div>
+                <CoinPrice priceVnd={course.base_price} size="lg" />
               )}
             </div>
           )}
@@ -541,7 +546,7 @@ export default function CourseSidebar({
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   ) : (
                     <>
-                      <HiPlay className="h-5 w-5" />
+                      <CirclePlay solid className="h-5 w-5" />
                       <span>Truy cập bài giảng</span>
                     </>
                   )}
@@ -669,7 +674,7 @@ export default function CourseSidebar({
                     disabled={!courseSlug}
                     className="w-full py-3.5 px-4 rounded-xl bg-primary hover:bg-primary-hover text-primary-foreground font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                   >
-                    <HiShoppingCart className="h-5 w-5" />
+                    <ShoppingCart className="h-5 w-5" />
                     <span>Đăng ký khóa học ngay</span>
                   </button>
 
@@ -684,7 +689,7 @@ export default function CourseSidebar({
                           : "border border-border text-foreground hover:border-primary-pastel hover:bg-background"
                       }`}
                     >
-                      <HiHeart
+                      <Heart solid
                         className={`h-4 w-4 ${isFavourite ? "fill-current" : ""}`}
                       />
                       <span>
@@ -701,7 +706,7 @@ export default function CourseSidebar({
                       onClick={handleShare}
                       className="flex-1 border border-border text-foreground py-2.5 px-4 rounded-xl text-sm font-medium hover:border-primary-pastel hover:bg-background transition-colors flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      <HiShare className="h-4 w-4" />
+                      <Share2 className="h-4 w-4" />
                       <span>Chia sẻ</span>
                     </button>
                   </div>
@@ -722,7 +727,7 @@ export default function CourseSidebar({
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   ) : (
                     <>
-                      <HiPlay className="h-5 w-5" />
+                      <CirclePlay solid className="h-5 w-5" />
                       <span>Bắt đầu học miễn phí</span>
                     </>
                   )}
@@ -739,7 +744,7 @@ export default function CourseSidebar({
                         : "border border-border text-foreground hover:border-primary-pastel hover:bg-background"
                     }`}
                   >
-                    <HiHeart
+                    <Heart solid
                       className={`h-4 w-4 ${isFavourite ? "fill-current" : ""}`}
                     />
                     <span>{isFavourite ? "Đã lưu" : "Yêu thích"}</span>
@@ -750,7 +755,7 @@ export default function CourseSidebar({
                     onClick={handleShare}
                     className="flex-1 border border-border text-foreground py-2.5 px-4 rounded-xl text-sm font-medium hover:border-primary-pastel hover:bg-background transition-colors flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <HiShare className="h-4 w-4" />
+                    <Share2 className="h-4 w-4" />
                     <span>Chia sẻ</span>
                   </button>
                 </div>
@@ -767,7 +772,7 @@ export default function CourseSidebar({
 
           <div className="flex justify-between items-center py-2 border-b border-border/70">
             <span className="flex items-center gap-2 text-muted-foreground">
-              <HiClock className="w-4 h-4 text-primary" />
+              <Clock className="w-4 h-4 text-primary" />
               <span>Thời lượng</span>
             </span>
             <span className="font-semibold text-foreground">
@@ -777,7 +782,7 @@ export default function CourseSidebar({
 
           <div className="flex justify-between items-center py-2 border-b border-border/70">
             <span className="flex items-center gap-2 text-muted-foreground">
-              <HiBookOpen className="w-4 h-4 text-primary" />
+              <BookOpen className="w-4 h-4 text-primary" />
               <span>Số bài giảng</span>
             </span>
             <span className="font-semibold text-foreground">
@@ -787,7 +792,7 @@ export default function CourseSidebar({
 
           <div className="flex justify-between items-center py-2 border-b border-border/70">
             <span className="flex items-center gap-2 text-muted-foreground">
-              <HiAcademicCap className="w-4 h-4 text-primary" />
+              <GraduationCap className="w-4 h-4 text-primary" />
               <span>Trình độ</span>
             </span>
             <span className="font-semibold text-foreground">
@@ -803,7 +808,7 @@ export default function CourseSidebar({
 
           <div className="flex justify-between items-center py-2 border-b border-border/70">
             <span className="flex items-center gap-2 text-muted-foreground">
-              <HiGlobe className="w-4 h-4 text-primary" />
+              <Earth className="w-4 h-4 text-primary" />
               <span>Ngôn ngữ giảng dạy</span>
             </span>
             <span className="font-semibold text-foreground">Tiếng Việt</span>
@@ -811,7 +816,7 @@ export default function CourseSidebar({
 
           <div className="flex justify-between items-center pt-2">
             <span className="flex items-center gap-2 text-muted-foreground">
-              <HiCheckCircle className="w-4 h-4 text-primary" />
+              <CircleCheck solid className="w-4 h-4 text-primary" />
               <span>Trợ giảng Mây Mây AI</span>
             </span>
             <span className="font-semibold text-primary">Hỗ trợ 24/7</span>

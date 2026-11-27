@@ -20,6 +20,10 @@ from app.schemas.learning_paths import (
 )
 from app.services.bundles import BundleService
 from app.services.learning_paths import LearningPathService
+from app.services.personalized_roadmap import (
+    LearningPreferencesInput,
+    PersonalizedRoadmapService,
+)
 
 router = APIRouter(tags=["Learning paths & bundles"])
 SESSION = Depends(get_session)
@@ -137,6 +141,28 @@ async def my_paths(db=SESSION, auth: AuthorizationService = AUTH):
     return {"items": [dict(row) for row in rows]}
 
 
+@router.get("/learning-paths/my/blueprint")
+async def my_roadmap_blueprint(
+    grade: int | None = Query(None, ge=1, le=12),
+    db=SESSION,
+    auth: AuthorizationService = AUTH,
+):
+    user = await auth.get_current_user()
+    return await PersonalizedRoadmapService(db).get_blueprint(
+        user, preview_grade=grade
+    )
+
+
+@router.put("/learning-paths/my/preferences")
+async def update_my_roadmap_preferences(
+    payload: LearningPreferencesInput,
+    db=SESSION,
+    auth: AuthorizationService = AUTH,
+):
+    user = await auth.get_current_user()
+    return await PersonalizedRoadmapService(db).update_preferences(user, payload)
+
+
 @router.get("/learning-paths/versions/{version_id}")
 async def path_version(version_id: UUID, db=SESSION, auth: AuthorizationService = AUTH):
     user = await auth.get_current_user_if_any()
@@ -214,12 +240,35 @@ async def bundles(
     limit: int = Query(12, ge=1, le=50),
     keyword: str = Query("", max_length=160),
     price_filter: Literal["all", "free", "paid"] = "all",
-    sort: Literal["title", "recent", "price_asc", "price_desc"] = "title",
+    sort: Literal["title", "recent", "price_asc", "price_desc", "savings_desc"] = "recent",
+    level: Literal["tieu-hoc", "thcs", "thpt"] | None = None,
+    has_coupon: bool = False,
+    saved_only: bool = False,
     db=SESSION,
+    auth: AuthorizationService = AUTH,
 ):
+    user = await auth.get_current_user_if_any()
     return await BundleService(db).listing(
-        page=page, limit=limit, keyword=keyword, price_filter=price_filter, sort=sort
+        page=page,
+        limit=limit,
+        keyword=keyword,
+        price_filter=price_filter,
+        sort=sort,
+        level=level,
+        has_coupon=has_coupon,
+        saved_only=saved_only,
+        user_id=user.id if user else None,
     )
+
+
+@router.post("/bundles/{bundle_id}/bookmark")
+async def toggle_bundle_bookmark(
+    bundle_id: UUID,
+    db=SESSION,
+    auth: AuthorizationService = AUTH,
+):
+    user = await auth.get_current_user()
+    return await BundleService(db).toggle_bookmark(user.id, bundle_id)
 
 
 @router.get("/bundles/orders/my")
@@ -248,12 +297,16 @@ async def receipt(order_id: UUID, db=SESSION, auth: AuthorizationService = AUTH)
 async def quote(
     version_id: UUID,
     coupon_code: str | None = Query(None, max_length=40),
+    auto_best: bool = Query(True),
     db=SESSION,
     auth: AuthorizationService = AUTH,
 ):
     user = await auth.get_current_user_if_any()
     return await BundleService(db).quote(
-        version_id, user.id if user else None, coupon_code=coupon_code
+        version_id,
+        user.id if user else None,
+        coupon_code=coupon_code,
+        auto_best=auto_best,
     )
 
 

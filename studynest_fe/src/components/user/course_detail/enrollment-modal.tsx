@@ -1,9 +1,13 @@
 "use client";
 
+import { CoinBadge, CoinPrice } from "@/components/ui";
+import { paymentCheck, vndToCoinCeil } from "@/lib/learning-hub/coin-logic";
+import { useCoinBalances } from "@/lib/learning-hub/shop-hooks";
 import { getImageUrl } from "@/lib/utils/helpers/image";
 import { Course } from "@/types/user/course_detail";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { HiAcademicCap, HiCheckCircle, HiClock } from "react-icons/hi";
+import { GraduationCap, CircleCheck, Clock } from "pulsoicon-react";
 
 interface EnrollmentModalProps {
   isOpen: boolean;
@@ -39,6 +43,12 @@ export default function EnrollmentModal({
   discountName,
 }: EnrollmentModalProps) {
   const router = useRouter();
+  const coins = useCoinBalances();
+  const priceVnd = finalPrice ?? course.base_price;
+  const priceCoin = coins.data && priceVnd > 0 ? vndToCoinCeil(priceVnd, coins.data.rateVnd) : 0;
+  const payment = coins.data && priceCoin > 0 ? paymentCheck(priceCoin, coins.data) : null;
+  // Chưa biết số dư thì không chặn (backend vẫn kiểm tra); biết là thiếu Coin thật thì khóa nút.
+  const lacksCoin = payment ? !payment.ok : false;
 
   if (!isOpen) return null;
 
@@ -53,7 +63,7 @@ export default function EnrollmentModal({
           <>
             <div className="bg-gradient-to-br from-primary-light via-surface to-secondary-light/60 border-b border-border px-6 py-7 text-center">
               <div className="w-14 h-14 bg-primary text-primary-foreground rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-xs">
-                <HiAcademicCap className="h-7 w-7" />
+                <GraduationCap className="h-7 w-7" />
               </div>
               <h3 className="font-display text-2xl font-bold text-foreground mb-1">
                 Xác nhận đăng ký học
@@ -77,7 +87,7 @@ export default function EnrollmentModal({
                     {course.title}
                   </h4>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <HiClock className="h-4 w-4 text-primary" />
+                    <Clock className="h-4 w-4 text-primary" />
                     <span>{formatSecondsToHms(totalDurationSeconds)}</span>
                     <span>•</span>
                     <span>
@@ -89,27 +99,15 @@ export default function EnrollmentModal({
                     </span>
                   </div>
                   <div className="mt-2">
-                    {finalPrice !== undefined &&
-                    finalPrice < course.base_price ? (
-                      <div className="space-y-0.5">
-                        <div className="text-xs text-subtle-foreground line-through">
-                          {formatPrice(course.base_price, course.currency)}
-                        </div>
-                        <div className="text-xl font-bold text-primary">
-                          {formatPrice(finalPrice, course.currency)}
-                        </div>
-                        {discountAmount !== undefined && discountAmount > 0 && (
-                          <div className="text-xs text-success-foreground font-semibold">
-                            Tiết kiệm{" "}
-                            {formatPrice(discountAmount, course.currency)}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-xl font-bold text-primary">
-                        {formatPrice(course.base_price, course.currency)}
-                      </span>
-                    )}
+                    <CoinPrice
+                      priceVnd={finalPrice ?? course.base_price}
+                      originalPriceVnd={
+                        finalPrice !== undefined && finalPrice < course.base_price
+                          ? course.base_price
+                          : undefined
+                      }
+                      size="md"
+                    />
                   </div>
 
                   {discountCode && (
@@ -130,24 +128,70 @@ export default function EnrollmentModal({
 
               <div className="bg-primary-light/65 border border-primary-pastel rounded-2xl p-4 mb-6">
                 <h5 className="font-bold text-xs uppercase tracking-wider text-primary mb-2.5 flex items-center gap-1.5">
-                  <HiCheckCircle className="h-4 w-4" />
+                  <CircleCheck solid className="h-4 w-4" />
                   <span>Quyền lợi học viên Mây Mây</span>
                 </h5>
                 <ul className="space-y-1.5 text-xs sm:text-sm text-foreground">
                   <li className="flex items-center gap-2">
-                    <HiCheckCircle className="h-4 w-4 text-primary shrink-0" />
+                    <CircleCheck solid className="h-4 w-4 text-primary shrink-0" />
                     <span>Truy cập bài giảng mọi lúc, mọi nơi</span>
                   </li>
                   <li className="flex items-center gap-2">
-                    <HiCheckCircle className="h-4 w-4 text-primary shrink-0" />
+                    <CircleCheck solid className="h-4 w-4 text-primary shrink-0" />
                     <span>Trợ giảng Mây Mây AI giải đáp 24/7</span>
                   </li>
                   <li className="flex items-center gap-2">
-                    <HiCheckCircle className="h-4 w-4 text-primary shrink-0" />
+                    <CircleCheck solid className="h-4 w-4 text-primary shrink-0" />
                     <span>Luyện tập trắc nghiệm & theo dõi tiến độ</span>
                   </li>
                 </ul>
               </div>
+
+              {payment && coins.data && (
+                <div className="mb-6 space-y-3 rounded-2xl border border-[#E2B545]/70 bg-[#FFFDF5] p-4 text-sm text-foreground">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold text-foreground">Chi tiết thanh toán</span>
+                    <CoinBadge kind="gold" amount={priceCoin} size="sm" />
+                  </div>
+                  <div className="space-y-2 text-xs sm:text-sm">
+                    {payment.bonusUse > 0 ? (
+                      <div className="flex flex-wrap items-center gap-1.5 text-foreground">
+                        <span>Chiết khấu tự động:</span>
+                        <CoinBadge kind="white" amount={payment.bonusUse} size="sm" />
+                        <span className="text-muted-foreground">=</span>
+                        <CoinBadge kind="gold" amount={`-${payment.bonusGoldDiscount}`} size="sm" />
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground">
+                        Chưa áp dụng chiết khấu (tỷ lệ 10:1, tối đa 50%).
+                      </p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-1.5 font-semibold text-[#784705]">
+                      <span>Thanh toán:</span>
+                      <CoinBadge kind="gold" amount={payment.paidUse} size="sm" />
+                    </div>
+                    {payment.cashbackBonus > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-[#CBD5E1] bg-gradient-to-r from-[#FFFFFF] to-[#F1F5F9] px-3 py-2 text-xs font-medium text-[#334155]">
+                        <span>Hoàn ngay (20%):</span>
+                        <CoinBadge kind="white" amount={`+${payment.cashbackBonus}`} size="sm" />
+                        <span>cho lần mua tiếp theo</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-2.5 text-xs">
+                    <span className="text-muted-foreground">Số dư:</span>
+                    <CoinBadge kind="gold" amount={coins.data.paid} size="sm" />
+                    <CoinBadge kind="white" amount={coins.data.bonus} size="sm" />
+                  </div>
+                  {lacksCoin && (
+                    <div role="alert" className="flex flex-wrap items-center gap-1.5 font-semibold text-destructive-foreground">
+                      <span>Cần thêm</span>
+                      <CoinBadge kind="gold" amount={payment.missingPaid} size="sm" />
+                      <Link href="/wallets" className="underline underline-offset-4">Nạp ngay</Link>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex gap-3">
                 <button
@@ -161,7 +205,7 @@ export default function EnrollmentModal({
                 <button
                   type="button"
                   onClick={onEnroll}
-                  disabled={isEnrolling || !courseSlug}
+                  disabled={isEnrolling || !courseSlug || lacksCoin}
                   className="flex-1 py-3 px-4 rounded-xl bg-primary hover:bg-primary-hover text-primary-foreground text-sm font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   {isEnrolling ? (
@@ -171,7 +215,7 @@ export default function EnrollmentModal({
                     </>
                   ) : (
                     <>
-                      <HiAcademicCap className="h-4 w-4" />
+                      <GraduationCap className="h-4 w-4" />
                       <span>Xác nhận đăng ký</span>
                     </>
                   )}
@@ -182,7 +226,7 @@ export default function EnrollmentModal({
         ) : (
           <div className="px-6 py-10 text-center">
             <div className="w-16 h-16 bg-success-bg text-success-foreground rounded-full flex items-center justify-center mx-auto mb-4">
-              <HiCheckCircle className="h-9 w-9" />
+              <CircleCheck solid className="h-9 w-9" />
             </div>
             <h3 className="font-display text-2xl font-bold text-foreground mb-2">
               Đăng ký thành công!

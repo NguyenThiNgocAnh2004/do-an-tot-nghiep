@@ -1,12 +1,10 @@
 <div align="center">
 
-  <img src="studynest_fe/public/logo/maymay-logo.svg" alt="Mây Mây Logo" width="180" />
+  <img src="studynest_fe/public/logo/maymay-lockup.svg" alt="Mây Mây Logo" width="260" />
 
-# ☁️ MÂY MÂY ECOSYSTEM
-
-### **Nền Tảng Học Tập Thông Minh & Trợ Giảng AI Đa Nền Tảng**
-
-_Thiết kế theo triết lý **Cloudy Blue** — Korean Pastel Minimalism: Êm dịu, Tinh tế, Thoáng đãng & Hiện đại_
+  # ☁️ MÂY MÂY ECOSYSTEM
+  ### **Nền Tảng Học Tập Thông Minh & Trợ Giảng AI Đa Nền Tảng**
+  *Thiết kế theo triết lý **Cloudy Blue** — Korean Pastel Minimalism: Êm dịu, Tinh tế, Thoáng đãng & Hiện đại*
 
   <br />
 
@@ -14,13 +12,13 @@ _Thiết kế theo triết lý **Cloudy Blue** — Korean Pastel Minimalism: Êm
 
   <br />
 
-[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Next.js 15](https://img.shields.io/badge/Next.js_15-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org)
-[![React 19](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
-[![Expo](https://img.shields.io/badge/Expo_52-000020?style=for-the-badge&logo=expo&logoColor=white)](https://expo.dev)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org)
-[![pgvector](https://img.shields.io/badge/pgvector-Embedding-blueviolet?style=for-the-badge)](https://github.com/pgvector/pgvector)
-[![Cloudflare R2](https://img.shields.io/badge/Cloudflare_R2-F38020?style=for-the-badge&logo=cloudflare&logoColor=white)](https://www.cloudflare.com/products/r2/)
+  [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+  [![Next.js 15](https://img.shields.io/badge/Next.js_15-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org)
+  [![React 19](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
+  [![Expo](https://img.shields.io/badge/Expo_52-000020?style=for-the-badge&logo=expo&logoColor=white)](https://expo.dev)
+  [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org)
+  [![pgvector](https://img.shields.io/badge/pgvector-Embedding-blueviolet?style=for-the-badge)](https://github.com/pgvector/pgvector)
+  [![Cloudflare R2](https://img.shields.io/badge/Cloudflare_R2-F38020?style=for-the-badge&logo=cloudflare&logoColor=white)](https://www.cloudflare.com/products/r2/)
 
   <p align="center">
     <a href="#-tổng-quan-dự-án">Tổng Quan</a> •
@@ -46,7 +44,6 @@ _Thiết kế theo triết lý **Cloudy Blue** — Korean Pastel Minimalism: Êm
 **Mây Mây** là hệ sinh thái giáo dục trực tuyến toàn diện được thiết kế chuyên biệt cho học sinh THPT (lớp 10–12) và sinh viên. Dự án tích hợp sâu trí tuệ nhân tạo (AI Learning Agent V2) với khả năng ghi nhớ ngữ cảnh lâu dài, đàm thoại giọng nói thời gian thực và môi trường thực hành lập trình trực tuyến an toàn.
 
 Toàn bộ trải nghiệm người dùng tuân thủ nghiêm ngặt ngôn ngữ thiết kế **Cloudy Blue (Korean Pastel Minimalism)**:
-
 - 🎨 **Tỉ lệ vàng 70 / 20 / 10**: 70% không gian sáng & thoáng (`#F6FAFF`), 20% xanh mây pastel chủ đạo (`#356FA7`, `#E8F2FA`), 10% điểm nhấn dịu mắt (Pastel Pink, Lavender, Vanilla).
 - ✍️ **Typography biên tập**: Sự kết hợp hoàn mỹ giữa font sans-serif hiện đại `"Be Vietnam Pro"` và font có chân tao nhã `"Lora"`.
 - ☁️ **Linh vật Mây Mây**: Bạn đồng hành thông minh, thân thiện, hướng dẫn học tập theo lộ trình cá nhân hóa.
@@ -114,30 +111,25 @@ Toàn bộ trải nghiệm người dùng tuân thủ nghiêm ngặt ngôn ngữ
 ## ⚡ Tính Năng Đột Phá
 
 ### 1. 🤖 AI Learning Agent Runtime V2
-
 - **Cơ chế Bounded Planner & Tool Execution**: Kiểm soát số vòng lặp và token tối đa, ngăn ngừa vòng lặp vô hạn và bảo vệ ngân sách suy luận.
 - **Semantic Long-Term Memory**: Tự động lưu trữ và truy xuất sở thích học tập, phong cách tiếp thu bền vững theo tài khoản người dùng, được bảo vệ bởi sự đồng thuận (consent).
 - **Automatic Context Window Compaction**: Tự động nén ngữ cảnh thông minh khi lịch sử hội thoại vượt quá 80% cửa sổ ngữ cảnh của mô hình.
 - **Đa Thể Thức Bản Địa (Multimodal Vision & Audio)**: Phân tích ảnh bài tập trực quan và phụ đề bài giảng chính xác.
 
 ### 2. 🎙️ Live Voice Tutoring & Realtime Dictation
-
 - **Đàm thoại trực tiếp độ trễ thấp**: Trợ giảng giọng nói hai chiều hỗ trợ bởi mô hình âm thanh xAI Voice STT/TTS.
 - **Audio Recorder tối ưu**: Thu âm PCM16 trực tiếp trên trình duyệt, không lưu trữ audio dư thừa, tự động phiên âm văn bản vào ô nhập liệu.
 
 ### 3. 💻 Môi Trường Lập Trình Trực Tuyến An Toàn
-
 - **Code Editor CodeMirror hiện đại**: Hỗ trợ đầy đủ C++, Python, JavaScript, TypeScript với syntax highlighting và phím tắt thông minh.
 - **Chấm bài tự động qua Piston Engine**: Môi trường sandbox biệt lập, kiểm thử sample tests và hidden test cases tức thì.
 
 ### 4. 🗺️ Lộ Trình Học & Gói Khóa Học (Combos)
-
 - **Bản đồ lộ trình học tập**: Học viên dễ dàng theo dõi từng chặng từ cơ bản đến nâng cao.
 - **Gói Combo tiết kiệm**: Giảng viên có thể gom nhóm các khóa học liên quan với chính sách giá ưu đãi và hệ thống coupon linh hoạt.
 - **Hệ thống Đối tác & Tổ chức Đào tạo (Providers)**: Quản lý danh mục khóa học, giảng viên và báo cáo doanh thu trực quan.
 
 ### 5. 🎮 Gamification & Tương Tác Cộng Đồng
-
 - **Điểm danh hàng ngày & Streak Counter**: Giữ lửa học tập đều đặn với phần thưởng điểm kinh nghiệm và huy hiệu.
 - **Q&A Thảo Luận Bài Học**: Quy chuẩn kiểm duyệt nội dung an toàn, hỗ trợ Markdown bảo mật (Safe HTML rendering).
 - **Chuyển tặng quyền học (Gift Claims)**: Tính năng tặng khóa học hoặc combo bài học cho bạn bè qua email bảo mật.
@@ -226,7 +218,6 @@ hoctap/
 ## 🚀 Khởi Chạy Nhanh (Quickstart)
 
 ### 📌 Yêu Cầu Tiên Quyết
-
 - **Node.js**: Phiên bản `20.9.x` trở lên (Khuyến nghị `v24.x` hoặc `v26.x`).
 - **Package Manager**: `pnpm` (`corepack enable pnpm`).
 - **Python**: Phiên bản `3.11.x`.
@@ -246,7 +237,6 @@ cp -n mobile/.env.example mobile/.env
 
 > [!TIP]
 > Thay giá trị `JWT_SECRET` trong file `studynest_be/.env` bằng một chuỗi ngẫu nhiên bảo mật:
->
 > ```bash
 > openssl rand -hex 32
 > ```
@@ -262,13 +252,13 @@ docker compose up -d --wait
 
 Docker Compose sẽ tự động khởi tạo cơ sở dữ liệu từ file `db.sql` sẵn có khi volume lần đầu được tạo.
 
-| Dịch vụ                   | Địa chỉ Local         | Mô tả                                        |
-| :------------------------ | :-------------------- | :------------------------------------------- |
-| **PostgreSQL + pgvector** | `127.0.0.1:5433`      | Cơ sở dữ liệu quan hệ và vector embeddings   |
-| **Redis**                 | `127.0.0.1:6379`      | Quản lý bộ nhớ đệm, session và rate-limiting |
-| **Mailpit SMTP**          | `127.0.0.1:1025`      | Máy chủ gửi thư thử nghiệm local             |
-| **Mailpit Web UI**        | http://localhost:8025 | Giao diện đọc email và lấy mã OTP tức thì    |
-| **Piston API**            | http://localhost:4000 | Engine biên dịch và chạy code biệt lập       |
+| Dịch vụ | Địa chỉ Local | Mô tả |
+| :--- | :--- | :--- |
+| **PostgreSQL + pgvector** | `127.0.0.1:5433` | Cơ sở dữ liệu quan hệ và vector embeddings |
+| **Redis** | `127.0.0.1:6379` | Quản lý bộ nhớ đệm, session và rate-limiting |
+| **Mailpit SMTP** | `127.0.0.1:1025` | Máy chủ gửi thư thử nghiệm local |
+| **Mailpit Web UI** | http://localhost:8025 | Giao diện đọc email và lấy mã OTP tức thì |
+| **Piston API** | http://localhost:4000 | Engine biên dịch và chạy code biệt lập |
 
 ---
 

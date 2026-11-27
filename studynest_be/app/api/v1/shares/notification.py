@@ -3,11 +3,14 @@ import json
 import uuid
 from uuid import UUID
 
-from app.core.deps import AuthorizationService
+from app.core.deps import AuthorizationService, receive_bounded_ws_text_async
 from app.core.settings import settings
 from app.core.ws_manager import ws_manager
 from app.db.models.database import User
-from app.schemas.shares.notification import PushTokenRegisterRequest
+from app.schemas.shares.notification import (
+    NotificationCreateSchema,
+    PushTokenRegisterRequest,
+)
 from app.schemas.shares.presence import (
     PresenceBulkRequest,
     PresenceBulkResponse,
@@ -15,7 +18,7 @@ from app.schemas.shares.presence import (
 )
 from app.services.shares.notification import NotificationService
 from app.services.shares.presence import PresenceService
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, WebSocketException
 from loguru import logger
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
@@ -25,28 +28,18 @@ router = APIRouter(prefix="/notifications", tags=["Notifications"])
 async def ws_notifications(websocket: WebSocket):
     await websocket.accept()
 
-    # Lấy user từ JWT
-    user: User | None = await AuthorizationService.get_require_role_ws(
-        websocket, ["USER", "LECTURER", "ADMIN"]
-    )
+    active_role = websocket.query_params.get("role_name")
+    if active_role not in {"USER", "LECTURER", "ADMIN"}:
+        await websocket.close(code=4401)
+        return
+    user: User | None = await AuthorizationService.get_require_role_ws(websocket, [active_role])
 
     # Không có user → đóng luôn (đã đóng trong deps.py)
     if not user:
         logger.warning("[WS][Notifications] Rejecting WS: user is None (already closed in deps)")
         return
 
-    # Lấy role đang active trên FE
-    active_role = websocket.query_params.get("role_name")
     user_id = str(user.id)
-
-    # Lấy danh sách role thực tế của user
-    user_roles = await AuthorizationService.get_list_role_in_user(user)
-
-    # Nếu role FE gửi lên không thuộc user → đóng luôn
-    if active_role not in user_roles:
-        logger.warning(f"[WS][Notifications] Rejecting WS: active_role='{active_role}' not in user_roles={user_roles}")
-        await websocket.close()
-        return
     channel = ""
     auth_channel = f"AUTH_{user_id}"
     connection_id = str(uuid.uuid4())
@@ -68,7 +61,7 @@ async def ws_notifications(websocket: WebSocket):
         while True:
             try:
                 raw_message = await asyncio.wait_for(
-                    websocket.receive_text(),
+                    receive_bounded_ws_text_async(websocket),
                     timeout=max(settings.PRESENCE_TTL_SECONDS / 2, 15),
                 )
             except asyncio.TimeoutError:
@@ -84,7 +77,9 @@ async def ws_notifications(websocket: WebSocket):
                 pass
 
             await presence_service.heartbeat(user_id, connection_id, status=status)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, WebSocketException) as exc:
+        if isinstance(exc, WebSocketException):
+            await websocket.close(code=exc.code)
         ws_manager.disconnect(websocket, channel)
         if auth_channel != channel:
             ws_manager.disconnect(websocket, auth_channel)
@@ -124,6 +119,7 @@ async def get_user_notifications(
     page: int = 1,
     limit: int = 20,
     search: str | None = None,
+    type: str | None = None,
     type_: str | None = None,
     is_read: bool | None = None,
     sort_by: str = "created_at",
@@ -136,7 +132,7 @@ async def get_user_notifications(
         page=page,
         limit=limit,
         search=search,
-        type_=type_,
+        type_=type or type_,
         is_read=is_read,
         sort_by=sort_by,
         order_dir=order_dir,
@@ -150,6 +146,7 @@ async def get_lecturer_notifications(
     page: int = 1,
     limit: int = 20,
     search: str | None = None,
+    type: str | None = None,
     type_: str | None = None,
     is_read: bool | None = None,
     sort_by: str = "created_at",
@@ -162,7 +159,7 @@ async def get_lecturer_notifications(
         page=page,
         limit=limit,
         search=search,
-        type_=type_,
+        type_=type or type_,
         is_read=is_read,
         sort_by=sort_by,
         order_dir=order_dir,
@@ -176,6 +173,7 @@ async def get_admin_notifications(
     page: int = 1,
     limit: int = 20,
     search: str | None = None,
+    type: str | None = None,
     type_: str | None = None,
     is_read: bool | None = None,
     sort_by: str = "created_at",
@@ -188,7 +186,7 @@ async def get_admin_notifications(
         page=page,
         limit=limit,
         search=search,
-        type_=type_,
+        type_=type or type_,
         is_read=is_read,
         sort_by=sort_by,
         order_dir=order_dir,
@@ -237,6 +235,41 @@ async def read_notification(
     return updated
 
 
+@router.post("/unread/{notification_id}")
+async def unread_notification(
+    notification_id: UUID,
+    service: NotificationService = Depends(NotificationService),
+    authorization_service: AuthorizationService = Depends(AuthorizationService),
+):
+    user = await authorization_service.get_current_user()
+    roles = await authorization_service.get_list_role_in_user(user)
+    return await service.mark_as_unread(
+        notification_id, user.id, admin="ADMIN" in roles
+    )
+
+
+@router.delete("/read/user")
+async def delete_read_user_notifications(
+    service: NotificationService = Depends(NotificationService),
+    authorization_service: AuthorizationService = Depends(AuthorizationService),
+):
+    user = await authorization_service.get_current_user()
+    return await service.delete_read_notifications_async(user.id, "USER")
+
+
+@router.delete("/{notification_id}")
+async def delete_notification(
+    notification_id: UUID,
+    service: NotificationService = Depends(NotificationService),
+    authorization_service: AuthorizationService = Depends(AuthorizationService),
+):
+    user = await authorization_service.get_current_user()
+    roles = await authorization_service.get_list_role_in_user(user)
+    return await service.delete_notification_async(
+        notification_id, user.id, admin="ADMIN" in roles
+    )
+
+
 @router.post("/push-tokens")
 async def register_push_token(
     body: PushTokenRegisterRequest,
@@ -248,3 +281,30 @@ async def register_push_token(
         user.id, body.token, body.device_type
     )
     return result
+
+
+@router.post("/test-device")
+async def send_test_device_notification(
+    service: NotificationService = Depends(NotificationService),
+    authorization_service: AuthorizationService = Depends(AuthorizationService),
+):
+    """Tạo và phát 1 thông báo thử nghiệm realtime qua WebSocket để kiểm chứng thông báo thiết bị."""
+    user = await authorization_service.get_current_user()
+    roles = await authorization_service.get_list_role_in_user(user)
+    target_role = "USER" if "USER" in roles else (roles[0] if roles else "USER")
+    notif = await service.create_notification_async(
+        NotificationCreateSchema(
+            user_id=user.id,
+            role_target=[target_role],
+            title="Thông báo thiết bị Mây Mây đã sẵn sàng!",
+            content="Hệ thống thông báo realtime và thông báo thiết bị của bạn đang hoạt động chuẩn xác.",
+            url="/notifications",
+            type="system",
+            action="test_device",
+        )
+    )
+    return {
+        "success": True,
+        "notification_id": str(notif.id),
+        "role_target": target_role,
+    }

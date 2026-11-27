@@ -1,9 +1,12 @@
 "use client";
 
 import CourseEducationInfo from "@/components/catalog/course-education";
+import { formatCoursePriceCoin } from "@/lib/learning-hub/coin-logic";
+import { useCoinRate } from "@/lib/learning-hub/shop-hooks";
 import api from "@/lib/utils/fetcher/client/axios";
 import { showToast } from "@/lib/utils/helpers/toast";
 import { useUserStore } from "@/stores/user";
+import type { CourseEducation } from "@/types/catalog";
 import { CourseDetailData } from "@/types/user/course_detail";
 import { useParams, useRouter } from "next/navigation";
 import React, { useEffect, useState } from "react";
@@ -17,6 +20,7 @@ import EnrollmentModal from "./enrollment-modal";
 import InstructorSection from "./instructor-section";
 import OutcomesSection from "./outcomes-section";
 import PreviewModal from "./preview-modal";
+import { toYoutubeEmbedUrl } from "./youtube-embed";
 import RelatedTopicsSection from "./related-topics-section";
 import RequirementsSection from "./requirements-section";
 import ReviewsSection from "./reviews-section";
@@ -27,6 +31,7 @@ const CourseDetail = () => {
   const params = useParams();
   const router = useRouter();
   const user = useUserStore((s) => s.user);
+  const coinRateVnd = useCoinRate();
   const slug = params?.slug as string;
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
@@ -54,12 +59,35 @@ const CourseDetail = () => {
     error,
     isLoading: loading,
   } = useSWR<any>(
-    slug ? [`/courses/${slug}/detail-info-by-slug`] : null,
+    slug ? [`/courses/${slug}/detail-info-by-slug`, user?.id ?? "guest"] : null,
     async ([url]) => {
       const response = await api.get(url);
       return response.data;
     }
   );
+
+  const isEnrolled = Boolean(data?.is_enrolled);
+  const learningHref = `/learning/${data?.course?.slug || slug}`;
+
+  // Nếu người dùng đã sở hữu khóa học này thì chuyển thẳng vào lớp học, không cho ở lại trang bán khóa học
+  useEffect(() => {
+    if (isEnrolled && slug) {
+      router.replace(learningHref);
+    }
+  }, [isEnrolled, slug, learningHref, router]);
+
+  // Lấy phân loại chương trình học (SWR dùng chung cache key với CourseEducationInfo)
+  const { data: taxonomyData } = useSWR<CourseEducation>(
+    data?.course?.id ? `/catalog/courses/${data.course.id}/taxonomy` : null,
+    async (url: string) => {
+      const response = await api.get<CourseEducation>(url);
+      return response.data;
+    },
+    { revalidateOnFocus: false }
+  );
+
+  const courseEducation: CourseEducation | null =
+    data?.course?.education ?? data?.education ?? taxonomyData ?? null;
 
   // Only fetch favourite status when user is authenticated to avoid 401 -> /login redirect
   const { data: favouriteData, mutate: mutateFavourite } = useSWR(
@@ -100,17 +128,8 @@ const CourseDetail = () => {
     setExpandAllSections(!expandAllSections);
   };
 
-  const formatPrice = (price: number, currency = "VND") => {
-    if (price === 0) return "Miễn phí";
-    try {
-      return new Intl.NumberFormat("vi-VN", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 0,
-      }).format(price);
-    } catch {
-      return `${price.toLocaleString("en-US")} ${currency}`;
-    }
+  const formatPrice = (price: number, _currency?: string) => {
+    return formatCoursePriceCoin(price, coinRateVnd);
   };
 
   const formatDate = (dateString: string) => {
@@ -193,38 +212,6 @@ const CourseDetail = () => {
     }
   };
 
-  const toYoutubeEmbedUrl = (url: string): string => {
-    try {
-      if (!url) return "";
-      if (url.includes("youtube.com/embed/")) return url;
-
-      let videoId = "";
-      const watchMatch = url.match(/[?&]v=([^&]+)/);
-      if (watchMatch) {
-        videoId = watchMatch[1];
-      } else if (url.includes("youtu.be/")) {
-        const beMatch = url.match(/youtu\.be\/([^?&]+)/);
-        if (beMatch) {
-          videoId = beMatch[1];
-        }
-      } else if (url.includes("youtube.com/embed/")) {
-        const embedMatch = url.match(/embed\/([^?&]+)/);
-        if (embedMatch) {
-          videoId = embedMatch[1];
-        }
-      } else if (!url.includes("http")) {
-        videoId = url;
-      }
-
-      if (videoId) {
-        return `https://www.youtube.com/embed/${videoId}`;
-      }
-      return url;
-    } catch {
-      return url;
-    }
-  };
-
   const openPreview = async (courseId: string, lessonId?: string) => {
     try {
       setIsPreviewLoading(true);
@@ -294,6 +281,7 @@ const CourseDetail = () => {
             is_free: boolean;
             transaction_id: string | null;
             total_paid: string;
+            coin_cashback_bonus?: number;
             items: Array<{
               course_id: string;
               price: string;
@@ -303,16 +291,22 @@ const CourseDetail = () => {
           }>("/user/transaction/courses/checkout", checkoutPayload);
 
           if (checkoutResponse.status === 200 && checkoutResponse.data) {
-            const { is_free, transaction_id, message } = checkoutResponse.data;
-            showToast.success(message || "Thanh toán thành công! 🎉");
+            const { is_free, transaction_id, message, coin_cashback_bonus } = checkoutResponse.data;
+            const successMsg =
+              coin_cashback_bonus && coin_cashback_bonus > 0
+                ? `Thanh toán thành công! Bạn được hoàn +${coin_cashback_bonus} Coin trắng (20%) cho lần mua tiếp theo.`
+                : message || "Thanh toán thành công!";
+            showToast.success(successMsg);
 
             if (is_free) {
               setTimeout(() => {
                 router.push(`/learning/${courseSlug}`);
               }, 1500);
             } else if (transaction_id) {
-              const redirectUrl = `/transaction?status=success&order_id=${transaction_id}&redirect=/learning/${courseSlug}`;
-              router.push(redirectUrl);
+              const params = new URLSearchParams({
+                status: "success", order_id: transaction_id, redirect: `/learning/${courseSlug}`,
+              });
+              router.push(`/transaction?${params}`);
             } else {
               setTimeout(() => {
                 router.push(`/learning/${courseSlug}`);
@@ -354,6 +348,17 @@ const CourseDetail = () => {
       setIsEnrolling(false);
     }
   };
+
+  if (isEnrolled) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="flex items-center gap-3 rounded-full border border-primary-pastel bg-surface px-6 py-3.5 text-sm font-semibold text-primary shadow-sm">
+          <span className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <span>Bạn đã sở hữu khóa học này · Đang chuyển vào lớp học...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -469,6 +474,7 @@ const CourseDetail = () => {
       <CourseHeader
         course={course}
         categoryChain={category_chain}
+        education={courseEducation}
         totalDurationSeconds={totalDurationSeconds}
         formatDate={formatDate}
         formatSecondsToHms={formatSecondsToHms}
@@ -495,7 +501,10 @@ const CourseDetail = () => {
             <DescriptionSection description={course.description} />
             <RequirementsSection requirements={course.requirements} />
             <TargetAudienceSection targetAudience={course.target_audience} />
-            <RelatedTopicsSection categories={category_chain} />
+            <RelatedTopicsSection
+              categories={category_chain}
+              education={courseEducation}
+            />
             <InstructorSection instructor={course.instructor} />
             {sample_reviews && sample_reviews.length > 0 && (
               <ReviewsSection reviews={sample_reviews} />

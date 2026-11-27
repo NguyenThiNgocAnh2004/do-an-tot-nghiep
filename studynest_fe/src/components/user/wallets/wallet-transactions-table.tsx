@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui";
 import { WalletTransaction } from "@/types/user/wallet";
 import Link from "next/link";
-import { HiArrowDown, HiArrowRight, HiArrowUp, HiRefresh } from "react-icons/hi";
+import { ArrowDown, ArrowRight, ArrowUp, RefreshCw } from "pulsoicon-react";
 
 interface Props {
   transactions: WalletTransaction[];
@@ -9,12 +9,9 @@ interface Props {
   onRetry?: (orderId?: string | null) => void;
 }
 
-const formatCurrency = (val?: number) =>
-  new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(val ?? 0);
+import { formatVndAsCoin } from "@/lib/learning-hub/coin-logic";
+
+const formatCurrency = (val?: number) => formatVndAsCoin(val ?? 0);
 
 const formatDateTime = (val?: string | null) => {
   if (!val) return "Đang cập nhật";
@@ -31,10 +28,10 @@ const formatDateTime = (val?: string | null) => {
 
 const getTypeLabel = (type: string) => {
   const labels: Record<string, string> = {
-    deposit: "Nạp tiền vào ví",
+    deposit: "Nạp Coin vàng",
     purchase: "Thanh toán khóa học",
-    withdraw: "Rút tiền về tài khoản",
-    refund: "Hoàn tiền học phí",
+    withdraw: "Rút Coin về ngân hàng",
+    refund: "Hoàn Coin học phí",
     income: "Thu nhập giảng dạy",
   };
   return labels[type] || type;
@@ -96,7 +93,7 @@ export function WalletTransactionsTable({
           className="inline-flex items-center gap-1.5 rounded-full border border-primary-pastel bg-primary-light px-4 py-2 text-xs font-semibold text-primary transition-all duration-200 hover:bg-primary hover:text-primary-foreground shadow-2xs"
         >
           <span>Xem tất cả</span>
-          <HiArrowRight className="h-3.5 w-3.5" />
+          <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       </div>
 
@@ -108,7 +105,7 @@ export function WalletTransactionsTable({
                 Loại giao dịch
               </th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Số tiền
+                Số lượng (Coin)
               </th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Trạng thái
@@ -150,9 +147,9 @@ export function WalletTransactionsTable({
                           }`}
                         >
                           {income ? (
-                            <HiArrowDown className="h-4 w-4" />
+                            <ArrowDown animated={false} className="h-4 w-4" />
                           ) : (
-                            <HiArrowUp className="h-4 w-4" />
+                            <ArrowUp animated={false} className="h-4 w-4" />
                           )}
                         </div>
                         <div>
@@ -192,7 +189,7 @@ export function WalletTransactionsTable({
                             disabled={retryOrderId === t.order_id}
                             className="inline-flex items-center gap-1.5 rounded-full border border-primary-pastel bg-surface px-3 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary-light disabled:opacity-60 cursor-pointer shadow-2xs"
                           >
-                            <HiRefresh
+                            <RefreshCw animated={false}
                               className={`h-3.5 w-3.5 ${
                                 retryOrderId === t.order_id ? "animate-spin" : ""
                               }`}

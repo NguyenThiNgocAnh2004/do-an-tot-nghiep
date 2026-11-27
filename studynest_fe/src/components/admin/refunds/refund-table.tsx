@@ -8,14 +8,11 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
-import { HiArrowDown, HiArrowUp } from "react-icons/hi";
+import { ArrowDown, ArrowUp } from "pulsoicon-react";
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
+import { formatVndAsCoin } from "@/lib/learning-hub/coin-logic";
+
+const formatCurrency = (value: number) => formatVndAsCoin(value);
 
 const formatDateTime = (value: string | null) => {
   if (!value) return "—";
@@ -128,9 +125,9 @@ export function RefundRequestsTable({
                         {sortBy === col.key && (
                           <span className="text-green-600">
                             {orderDir === "asc" ? (
-                              <HiArrowUp className="h-4 w-4" />
+                              <ArrowUp className="h-4 w-4" />
                             ) : (
-                              <HiArrowDown className="h-4 w-4" />
+                              <ArrowDown className="h-4 w-4" />
                             )}
                           </span>
                         )}

@@ -2,22 +2,24 @@
 
 import { Badge } from "@/components/ui";
 import { getImageUrl } from "@/lib/utils/helpers/image";
+import type { CourseEducation } from "@/types/catalog";
 import { CategoryItem, Course } from "@/types/user/course_detail";
 import Link from "next/link";
 import {
-  HiAcademicCap,
-  HiBookOpen,
-  HiClock,
-  HiGlobe,
-  HiPlay,
-  HiCloud,
-  HiStar,
-  HiUserGroup,
-} from "react-icons/hi";
+  GraduationCap,
+  BookOpen,
+  Clock,
+  Earth,
+  CirclePlay,
+  Cloud,
+  Star,
+  UsersRound,
+} from "pulsoicon-react";
 
 interface CourseHeaderProps {
   course: Course;
   categoryChain: CategoryItem[];
+  education?: CourseEducation | null;
   totalDurationSeconds?: number;
   formatDate: (dateString: string) => string;
   formatSecondsToHms?: (seconds: number) => string;
@@ -28,6 +30,7 @@ interface CourseHeaderProps {
 export default function CourseHeader({
   course,
   categoryChain,
+  education,
   totalDurationSeconds = 0,
   formatDate,
   formatSecondsToHms,
@@ -37,6 +40,48 @@ export default function CourseHeader({
     (sum, s) => sum + (s.lessons?.length || 0),
     0,
   );
+
+  const educationBreadcrumbs: Array<{ key: string; label: string; href: string }> =
+    [];
+  if (education && !education.needs_classification) {
+    if (education.subject) {
+      const subjectParam = education.subject.slug || education.subject.code;
+      educationBreadcrumbs.push({
+        key: `subject-${education.subject.id}`,
+        label: education.subject.name,
+        href: `/courses?subject=${encodeURIComponent(subjectParam)}`,
+      });
+    }
+    const primaryGrade = education.grades?.[0];
+    if (primaryGrade) {
+      const gradeParam =
+        primaryGrade.grade_number != null
+          ? String(primaryGrade.grade_number)
+          : primaryGrade.code;
+      educationBreadcrumbs.push({
+        key: `grade-${primaryGrade.id}`,
+        label: primaryGrade.name,
+        href: `/courses?grade=${encodeURIComponent(gradeParam)}`,
+      });
+    }
+    const primaryGoal = education.learning_goals?.[0];
+    if (primaryGoal) {
+      educationBreadcrumbs.push({
+        key: `goal-${primaryGoal.id}`,
+        label: primaryGoal.name,
+        href: `/courses?goal=${encodeURIComponent(primaryGoal.code)}`,
+      });
+    }
+    const primaryExam = education.exams?.[0];
+    if (primaryExam) {
+      educationBreadcrumbs.push({
+        key: `exam-${primaryExam.id}`,
+        label: primaryExam.name,
+        href: `/courses?exam=${encodeURIComponent(primaryExam.code)}`,
+      });
+    }
+  }
+  const hasEducation = educationBreadcrumbs.length > 0;
 
   return (
     <section className="relative overflow-hidden bg-gradient-to-br from-primary-light/85 via-background to-secondary-light/45 border-b border-border">
@@ -62,17 +107,42 @@ export default function CourseHeader({
           >
             Mây Mây
           </Link>
-          {categoryChain.map((category) => (
-            <div key={category.id} className="flex items-center gap-2">
-              <span className="text-subtle-foreground">/</span>
-              <Link
-                href={`/categories/${category.slug}`}
-                className="hover:text-primary font-medium transition-colors"
-              >
-                {category.name}
-              </Link>
-            </div>
-          ))}
+          {hasEducation ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-subtle-foreground">/</span>
+                <Link
+                  href="/courses"
+                  className="hover:text-primary font-medium transition-colors"
+                >
+                  Khóa học
+                </Link>
+              </div>
+              {educationBreadcrumbs.map((item) => (
+                <div key={item.key} className="flex items-center gap-2">
+                  <span className="text-subtle-foreground">/</span>
+                  <Link
+                    href={item.href}
+                    className="hover:text-primary font-medium transition-colors"
+                  >
+                    {item.label}
+                  </Link>
+                </div>
+              ))}
+            </>
+          ) : (
+            categoryChain.map((category) => (
+              <div key={category.id} className="flex items-center gap-2">
+                <span className="text-subtle-foreground">/</span>
+                <Link
+                  href={`/categories/${category.slug}`}
+                  className="hover:text-primary font-medium transition-colors"
+                >
+                  {category.name}
+                </Link>
+              </div>
+            ))
+          )}
         </nav>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
@@ -88,14 +158,34 @@ export default function CourseHeader({
                 Khóa học Mây Mây
               </Badge>
 
-              {categoryChain.length > 0 && (
-                <Badge variant="secondary" size="md">
-                  {categoryChain[categoryChain.length - 1].name}
-                </Badge>
+              {hasEducation ? (
+                <>
+                  {education?.subject && (
+                    <Badge variant="secondary" size="md">
+                      {education.subject.name}
+                    </Badge>
+                  )}
+                  {(education?.grades ?? []).slice(0, 2).map((grade) => (
+                    <Badge key={grade.id} variant="default" size="md">
+                      {grade.name}
+                    </Badge>
+                  ))}
+                  {education?.exams?.[0] && (
+                    <Badge variant="vanilla" size="md">
+                      {education.exams[0].name}
+                    </Badge>
+                  )}
+                </>
+              ) : (
+                categoryChain.length > 0 && (
+                  <Badge variant="secondary" size="md">
+                    {categoryChain[categoryChain.length - 1].name}
+                  </Badge>
+                )
               )}
 
               <Badge variant="vanilla" size="md">
-                <HiCloud className="w-3.5 h-3.5 mr-1 inline" />
+                <Cloud className="w-3.5 h-3.5 mr-1 inline" />
                 Học trực quan
               </Badge>
             </div>
@@ -109,7 +199,7 @@ export default function CourseHeader({
               <div className="inline-flex items-center gap-1.5 bg-surface/90 backdrop-blur-sm px-3.5 py-1.5 rounded-full border border-border shadow-2xs">
                 {course.rating_count > 0 && course.rating > 0 ? (
                   <>
-                    <HiStar className="h-4 w-4 text-warning-foreground" />
+                    <Star solid className="h-4 w-4 text-warning-foreground" />
                     <span className="font-bold text-sm text-foreground">
                       {course.rating.toFixed(1)}
                     </span>
@@ -126,14 +216,14 @@ export default function CourseHeader({
               </div>
 
               <div className="inline-flex items-center gap-1.5 bg-surface/90 backdrop-blur-sm px-3.5 py-1.5 rounded-full border border-border shadow-2xs text-xs sm:text-sm text-foreground font-medium">
-                <HiUserGroup className="h-4 w-4 text-primary" />
+                <UsersRound className="h-4 w-4 text-primary" />
                 <span>
                   {course.total_enrolls.toLocaleString("vi-VN")} học viên
                 </span>
               </div>
 
               <div className="inline-flex items-center gap-1.5 bg-surface/90 backdrop-blur-sm px-3.5 py-1.5 rounded-full border border-border shadow-2xs text-xs sm:text-sm text-foreground font-medium">
-                <HiBookOpen className="h-4 w-4 text-primary" />
+                <BookOpen className="h-4 w-4 text-primary" />
                 <span>
                   {course.sections?.length || 0} chương • {totalLessons} bài học
                 </span>
@@ -141,7 +231,7 @@ export default function CourseHeader({
 
               {formatSecondsToHms && totalDurationSeconds > 0 && (
                 <div className="inline-flex items-center gap-1.5 bg-surface/90 backdrop-blur-sm px-3.5 py-1.5 rounded-full border border-border shadow-2xs text-xs sm:text-sm text-foreground font-medium">
-                  <HiClock className="h-4 w-4 text-primary" />
+                  <Clock className="h-4 w-4 text-primary" />
                   <span>{formatSecondsToHms(totalDurationSeconds)}</span>
                 </div>
               )}
@@ -175,12 +265,12 @@ export default function CourseHeader({
               )}
 
               <div className="flex items-center gap-1.5">
-                <HiClock className="h-4 w-4 text-primary" />
+                <Clock className="h-4 w-4 text-primary" />
                 <span>Cập nhật: {formatDate(course.last_updated)}</span>
               </div>
 
               <div className="flex items-center gap-1.5">
-                <HiGlobe className="h-4 w-4 text-primary" />
+                <Earth className="h-4 w-4 text-primary" />
                 <span>
                   {course.language?.toLowerCase() === "vi" ||
                   course.language?.toLowerCase() === "vietnamese"
@@ -203,7 +293,7 @@ export default function CourseHeader({
                   />
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-primary-light via-surface to-secondary-light p-6 text-center">
-                    <HiAcademicCap className="w-12 h-12 text-primary mb-2" />
+                    <GraduationCap className="w-12 h-12 text-primary mb-2" />
                     <span className="text-xs font-semibold text-primary">
                       Học viện trên mây Mây Mây
                     </span>
@@ -220,7 +310,7 @@ export default function CourseHeader({
                     className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 z-10 cursor-pointer group/btn"
                   >
                     <span className="w-14 h-14 rounded-full bg-surface/92 backdrop-blur-md text-primary flex items-center justify-center shadow-lg ring-4 ring-white/40 transition-all duration-200 group-hover/btn:scale-110 group-hover/btn:bg-primary group-hover/btn:text-primary-foreground">
-                      <HiPlay className="h-6 w-6 translate-x-0.5" />
+                      <CirclePlay solid className="h-6 w-6 translate-x-0.5" />
                     </span>
                     <span className="px-3.5 py-1 rounded-full bg-surface/90 backdrop-blur-md text-xs font-bold text-foreground shadow-xs">
                       Xem giới thiệu bài giảng

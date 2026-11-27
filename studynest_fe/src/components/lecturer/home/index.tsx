@@ -1,59 +1,45 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import {
   ArrowRight,
   BarChart3,
-  BookOpen,
-  Clock,
-  Layers,
+  CheckCircle2,
+  FileText,
   Library,
   Plus,
   RotateCcw,
-  Star,
+  ShieldCheck,
   Tag,
-  TrendingDown,
-  TrendingUp,
-  Users,
   Video,
-  Wallet,
-} from "lucide-react";
-import { Badge, Button, Card, Skeleton } from "@/components/ui";
+} from "pulsoicon-react";
+import { Card, Skeleton } from "@/components/ui";
 import LecturerWelcome from "@/components/lecturer/welcome";
 import api from "@/lib/utils/fetcher/client/axios";
-import { getImageUrl } from "@/lib/utils/helpers/image";
 import { useUserStore } from "@/stores/user";
 import { HoldEarningsResponse } from "@/types/lecturer/hold";
+import { LecturerRefundRequestsResponse } from "@/types/lecturer/refund";
 import {
   CoursePerformanceItem,
   LecturerOverview,
 } from "@/types/lecturer/statistics";
 import { LecturerWallet } from "@/types/lecturer/wallet";
+import { CloudWaveChart, ColorCloudKpis } from "./revenue-pulse";
+import { StudioHero } from "./studio-hero";
+import { TopCoursesCard } from "./top-courses-card";
+import { CloudTreasuryPass, HoldPulseCard } from "./wallet-panel";
 
 interface IsLecturerResponse {
   is_lecturer: boolean;
 }
 
-const formatCurrency = (value?: number | null) => {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "0 ₫";
-  }
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
-};
-
-const LecturerHome = () => {
+const LecturerHome = ({ isLecturer }: { isLecturer?: boolean }) => {
   const router = useRouter();
 
-  // Kiểm tra quyền giảng viên
   const { data: lecturerData, isLoading: isCheckingLecturer } =
     useSWR<IsLecturerResponse | null>(
-      "/lecturer/courses/is_lecturer",
+      isLecturer === undefined ? "/lecturer/courses/is_lecturer" : null,
       async (url) => {
         try {
           const response = await api.get(url);
@@ -67,41 +53,35 @@ const LecturerHome = () => {
           throw error;
         }
       },
-      {
-        shouldRetryOnError: false,
-      }
+      { shouldRetryOnError: false },
     );
 
-  const isLecturer = lecturerData?.is_lecturer === true;
+  const canAccessDashboard = isLecturer ?? lecturerData?.is_lecturer === true;
 
   if (isCheckingLecturer) {
     return (
-      <div className="mx-auto max-w-7xl space-y-6 bg-background px-4 py-6 sm:px-6 lg:px-8">
-        <div className="space-y-3">
-          <Skeleton variant="text" className="h-6 w-48 rounded-full" />
-          <Skeleton variant="text" className="h-10 w-80 rounded-xl" />
-          <Skeleton variant="text" className="h-4 w-96 rounded-md" />
+      <div className="mx-auto max-w-7xl space-y-6 bg-background px-4 py-7 sm:px-6 lg:px-8">
+        <Skeleton variant="rect" className="h-60 w-full rounded-[32px]" />
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <Skeleton
+            variant="rect"
+            className="h-80 rounded-[28px] xl:col-span-8"
+          />
+          <Skeleton
+            variant="rect"
+            className="h-80 rounded-[28px] xl:col-span-4"
+          />
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} variant="rect" className="h-28 rounded-[20px]" />
+            <Skeleton key={i} variant="rect" className="h-32 rounded-[24px]" />
           ))}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <Skeleton
-            variant="rect"
-            className="lg:col-span-8 h-96 rounded-[24px]"
-          />
-          <Skeleton
-            variant="rect"
-            className="lg:col-span-4 h-96 rounded-[24px]"
-          />
         </div>
       </div>
     );
   }
 
-  if (isLecturer) {
+  if (canAccessDashboard) {
     return <LecturerDashboard router={router} />;
   }
 
@@ -115,27 +95,37 @@ const LecturerDashboard = ({
 }) => {
   const user = useUserStore((s) => s.user);
 
-  // Dữ liệu ví giảng viên
   const { data: wallet } = useSWR<LecturerWallet>(
     "/lecturer/wallets/lecturer/wallet",
     async (url) => {
       const response = await api.get(url);
       return response.data;
     },
-    { revalidateOnFocus: false }
+    { revalidateOnFocus: false },
   );
 
-  // Số lượng giao dịch đang giữ (hold)
   const { data: holdData } = useSWR<HoldEarningsResponse>(
     "/lecturer/transactions/earnings/holding?page=1&limit=1",
     async (url) => {
       const response = await api.get(url);
       return response.data;
     },
-    { revalidateOnFocus: false }
+    { revalidateOnFocus: false },
   );
 
-  // Số liệu tổng quan giảng viên
+  const { data: pendingRefunds } = useSWR<LecturerRefundRequestsResponse | null>(
+    "/lecturer/refunds/requests?page=1&limit=1&refund_status=requested",
+    async (url) => {
+      try {
+        const response = await api.get(url);
+        return response.data;
+      } catch {
+        return null;
+      }
+    },
+    { revalidateOnFocus: false, shouldRetryOnError: false },
+  );
+
   const { data: overview, isLoading: isLoadingOverview } =
     useSWR<LecturerOverview>(
       "/lecturer/statistics/overview",
@@ -143,10 +133,9 @@ const LecturerDashboard = ({
         const response = await api.get(url);
         return response.data;
       },
-      { revalidateOnFocus: false }
+      { revalidateOnFocus: false },
     );
 
-  // Danh sách khóa học tiêu biểu
   const { data: coursesPerformance, isLoading: isLoadingCourses } = useSWR<
     CoursePerformanceItem[]
   >(
@@ -155,284 +144,156 @@ const LecturerDashboard = ({
       const response = await api.get(url);
       return response.data;
     },
-    { revalidateOnFocus: false }
+    { revalidateOnFocus: false },
+  );
+
+  const { data: contractStatus } = useSWR<{
+    has_signed_master: boolean;
+    contract_number: string | null;
+    status: string | null;
+  } | null>(
+    "/lecturer/contracts/status",
+    async (url) => {
+      try {
+        const res = await api.get(url);
+        return res.data;
+      } catch {
+        return null;
+      }
+    },
+    { revalidateOnFocus: false, shouldRetryOnError: false },
   );
 
   const holdCount = holdData?.total ?? 0;
-  const topCourses = Array.isArray(coursesPerformance)
-    ? coursesPerformance.slice(0, 4)
-    : [];
-  const revenueGrowth = overview?.revenue_growth ?? 0;
-  const isGrowthPositive = revenueGrowth >= 0;
+  const pendingRefundCount = pendingRefunds?.total ?? 0;
 
-  const quickActions = [
+  // 6 phím tắt vận hành đa sắc mây (2×3 gọn đẹp)
+  const cloudDockActions = [
     {
-      title: "Tạo khóa học mới",
-      description: "Thiết kế giáo trình & xuất bản",
+      title: "Tạo khóa học",
+      description: "Soạn giáo trình & xuất bản",
       href: "/lecturer/courses/create",
       icon: Plus,
-      iconBg: "bg-primary-light text-primary border-primary-pastel/70",
-      hoverBorder: "hover:border-primary-pastel",
+      tileBg: "from-primary-light/85 to-surface border-primary-pastel/80",
+      iconBg: "bg-surface text-primary border-primary-pastel",
     },
     {
       title: "Quản lý khóa học",
-      description: "Chỉnh sửa nội dung & học viên",
+      description: "Chương bài, tài nguyên & HV",
       href: "/lecturer/courses",
       icon: Video,
-      iconBg: "bg-primary-light text-primary border-primary-pastel/70",
-      hoverBorder: "hover:border-primary-pastel",
+      tileBg: "from-secondary-light/80 to-surface border-secondary-pastel/80",
+      iconBg: "bg-surface text-secondary-foreground border-secondary-pastel",
     },
     {
-      title: "Chương & Bài học",
-      description: "Sắp xếp cấu trúc bài giảng",
-      href: "/lecturer/chapters",
-      icon: Layers,
-      iconBg:
-        "bg-secondary-light text-secondary-foreground border-secondary-pastel/70",
-      hoverBorder: "hover:border-secondary-pastel",
-    },
-    {
-      title: "Thống kê & Báo cáo",
-      description: "Theo dõi doanh thu & tương tác",
-      href: "/lecturer/dashboard",
-      icon: BarChart3,
-      iconBg: "bg-accent text-accent-foreground border-accent-border/70",
-      hoverBorder: "hover:border-accent-border",
-    },
-    {
-      title: "Combo khóa học",
-      description: "Gom khóa của bạn và mở bán ngay",
+      title: "Combo & Lộ trình",
+      description: "Đóng gói khóa học trọn bộ",
       href: "/lecturer/combos",
       icon: Library,
-      iconBg: "bg-primary-light text-primary border-primary-pastel/70",
-      hoverBorder: "hover:border-primary-pastel",
+      tileBg: "from-primary-light/70 to-surface border-primary-pastel/70",
+      iconBg: "bg-surface text-primary border-primary-pastel",
     },
     {
       title: "Mã giảm giá",
-      description: "Tạo chiến dịch ưu đãi học viên",
+      description: "Chiến dịch ưu đãi & combo",
       href: "/lecturer/discounts",
       icon: Tag,
+      tileBg: "from-accent-vanilla/90 to-surface border-accent-vanilla-border/80",
       iconBg:
-        "bg-accent-vanilla text-accent-vanilla-foreground border-accent-vanilla-border/70",
-      hoverBorder: "hover:border-accent-vanilla-border",
+        "bg-surface text-accent-vanilla-foreground border-accent-vanilla-border",
     },
     {
-      title: "Yêu cầu hoàn tiền",
-      description: "Xử lý phản hồi & đối soát",
+      title: "Thống kê sâu",
+      description: "Phân tích doanh thu & tương tác",
+      href: "/lecturer/dashboard",
+      icon: BarChart3,
+      tileBg: "from-success-bg/80 to-surface border-success-border/80",
+      iconBg: "bg-surface text-success-foreground border-success-border",
+    },
+    {
+      title: "Trạm hoàn tiền",
+      description: "Thẩm định & đối soát hồ sơ",
       href: "/lecturer/refund",
       icon: RotateCcw,
-      iconBg:
-        "bg-destructive-bg text-destructive-foreground border-destructive-border/70",
-      hoverBorder: "hover:border-destructive-border",
+      tileBg: "from-destructive-bg/65 to-surface border-destructive-border/75",
+      iconBg: "bg-surface text-destructive-foreground border-destructive-border",
     },
   ];
 
   return (
-    <div className="bg-background text-foreground">
-      <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-        <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">Bảng làm việc</p>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              Chào {user?.fullname || "thầy/cô"}
-            </h1>
-            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-              Theo dõi khóa học, học viên và doanh thu. Các mục vận hành nằm ở
-              cột điều hướng bên trái.
-            </p>
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-7 sm:px-6 lg:px-8">
+        {/* Tầng 1: Sky Studio Panoramic Hero */}
+        <StudioHero
+          fullname={user?.fullname}
+          overview={overview}
+          pendingRefundCount={pendingRefundCount}
+          holdCount={holdCount}
+        />
+
+        {/* Tầng 2: Asymmetric Showcase (8/4) — Cloud Wave Chart + Cloud Treasury Pass */}
+        <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-12">
+          <div className="xl:col-span-8">
+            <CloudWaveChart />
+          </div>
+          <div className="xl:col-span-4">
+            <CloudTreasuryPass wallet={wallet} />
+          </div>
+        </div>
+
+        {/* Tầng 3: 4 Thẻ KPI Đa Sắc Mây */}
+        <ColorCloudKpis
+          overview={overview}
+          isLoadingOverview={isLoadingOverview}
+        />
+
+        {/* Tầng 4: Spotlight Podium (7/12) + Cloud Dock & Hold Pulse (5/12) */}
+        <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-12">
+          <div className="xl:col-span-7">
+            <TopCoursesCard
+              courses={coursesPerformance}
+              isLoading={isLoadingCourses}
+            />
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 shrink-0">
-            <Link href="/lecturer/dashboard">
-              <Button
-                variant="pastel"
-                size="md"
-                leftIcon={<BarChart3 className="w-4 h-4" />}
-              >
-                Bảng thống kê
-              </Button>
-            </Link>
-            <Link href="/lecturer/courses/create">
-              <Button
-                variant="primary"
-                size="md"
-                leftIcon={<Plus className="w-4 h-4" />}
-              >
-                Tạo khóa học mới
-              </Button>
-            </Link>
-          </div>
-        </section>
-
-        {/* 2. Hàng 4 Thẻ Chỉ Số Tổng Quan (KPIs — Dữ liệu thực) */}
-        <section
-          aria-label="Chỉ số tổng quan giảng dạy"
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
-        >
-          {/* KPI 1: Tổng khóa học */}
-          <Link href="/lecturer/courses" className="block group">
+          <div className="space-y-6 xl:col-span-5">
+            {/* Cloud Dock: 6 phím tắt vận hành đa sắc pastel */}
             <Card
-              interactive
-              className="p-5 rounded-[20px] border-border bg-surface shadow-xs group-hover:border-primary-pastel transition-all"
+              variant="surface"
+              density="none"
+              className="overflow-hidden rounded-[28px] border border-border shadow-xs"
             >
-              <div className="flex items-start justify-between">
-                <div className="w-11 h-11 rounded-xl bg-primary-light text-primary border border-primary-pastel/60 flex items-center justify-center shrink-0">
-                  <BookOpen className="w-5 h-5" />
-                </div>
-                <ArrowRight className="w-4 h-4 text-subtle-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-              </div>
-              <div className="mt-4">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Tổng khóa học
+              <div className="border-b border-border bg-gradient-to-r from-primary-light/50 via-surface to-accent-vanilla/50 px-6 py-4">
+                <h2 className="font-display text-lg font-semibold text-foreground">
+                  Điều phối nhanh
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Truy cập 1 chạm tới mọi phân khu vận hành giảng dạy
                 </p>
-                {isLoadingOverview ? (
-                  <Skeleton variant="text" className="h-8 w-16 mt-1" />
-                ) : (
-                  <p className="text-2xl font-bold text-foreground mt-0.5">
-                    {(overview?.total_courses ?? 0).toLocaleString("vi-VN")}
-                  </p>
-                )}
-              </div>
-            </Card>
-          </Link>
-
-          {/* KPI 2: Tổng học viên */}
-          <Link href="/lecturer/dashboard" className="block group">
-            <Card
-              interactive
-              className="p-5 rounded-[20px] border-border bg-surface shadow-xs group-hover:border-secondary-pastel transition-all"
-            >
-              <div className="flex items-start justify-between">
-                <div className="w-11 h-11 rounded-xl bg-secondary-light text-secondary-foreground border border-secondary-pastel/60 flex items-center justify-center shrink-0">
-                  <Users className="w-5 h-5" />
-                </div>
-                <ArrowRight className="w-4 h-4 text-subtle-foreground group-hover:text-secondary-foreground group-hover:translate-x-0.5 transition-all" />
-              </div>
-              <div className="mt-4">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Tổng học viên
-                </p>
-                {isLoadingOverview ? (
-                  <Skeleton variant="text" className="h-8 w-20 mt-1" />
-                ) : (
-                  <p className="text-2xl font-bold text-foreground mt-0.5">
-                    {(overview?.total_students ?? 0).toLocaleString("vi-VN")}
-                  </p>
-                )}
-              </div>
-            </Card>
-          </Link>
-
-          {/* KPI 3: Đánh giá trung bình */}
-          <Link href="/lecturer/dashboard" className="block group">
-            <Card
-              interactive
-              className="p-5 rounded-[20px] border-border bg-surface shadow-xs group-hover:border-accent-vanilla-border transition-all"
-            >
-              <div className="flex items-start justify-between">
-                <div className="w-11 h-11 rounded-xl bg-accent-vanilla text-accent-vanilla-foreground border border-accent-vanilla-border/60 flex items-center justify-center shrink-0">
-                  <Star className="w-5 h-5 fill-current" />
-                </div>
-                <span className="text-[11px] font-medium text-subtle-foreground">
-                  {overview?.total_reviews ?? 0} đánh giá
-                </span>
-              </div>
-              <div className="mt-4">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Đánh giá trung bình
-                </p>
-                {isLoadingOverview ? (
-                  <Skeleton variant="text" className="h-8 w-16 mt-1" />
-                ) : (
-                  <p className="text-2xl font-bold text-foreground mt-0.5">
-                    {(overview?.average_rating ?? 0).toFixed(1)}{" "}
-                    <span className="text-sm font-normal text-subtle-foreground">
-                      / 5.0
-                    </span>
-                  </p>
-                )}
-              </div>
-            </Card>
-          </Link>
-
-          {/* KPI 4: Doanh thu tháng này */}
-          <Link href="/lecturer/wallets" className="block group">
-            <Card
-              interactive
-              className="p-5 rounded-[20px] border-border bg-surface shadow-xs group-hover:border-success-border transition-all"
-            >
-              <div className="flex items-start justify-between">
-                <div className="w-11 h-11 rounded-xl bg-success-bg text-success-foreground border border-success-border flex items-center justify-center shrink-0">
-                  <TrendingUp className="w-5 h-5" />
-                </div>
-                {!isLoadingOverview && (
-                  <Badge
-                    variant={isGrowthPositive ? "success" : "destructive"}
-                    size="sm"
-                    className="gap-1 text-[11px]"
-                  >
-                    {isGrowthPositive ? (
-                      <TrendingUp className="w-3 h-3" />
-                    ) : (
-                      <TrendingDown className="w-3 h-3" />
-                    )}
-                    {isGrowthPositive ? "+" : ""}
-                    {revenueGrowth.toFixed(1)}%
-                  </Badge>
-                )}
-              </div>
-              <div className="mt-4">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Doanh thu tháng này
-                </p>
-                {isLoadingOverview ? (
-                  <Skeleton variant="text" className="h-8 w-28 mt-1" />
-                ) : (
-                  <p className="text-2xl font-bold text-foreground mt-0.5 truncate">
-                    {formatCurrency(overview?.this_month_revenue)}
-                  </p>
-                )}
-              </div>
-            </Card>
-          </Link>
-        </section>
-
-        {/* 3. Bố cục chính 2 cột (8/12 Trái - 4/12 Phải) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Cột Trái (8 cột): Truy cập nhanh + Khóa học nổi bật */}
-          <div className="lg:col-span-8 space-y-6">
-            {/* Truy cập nhanh */}
-            <Card className="rounded-[24px] border-border bg-surface p-6 shadow-xs">
-              <div className="flex items-center justify-between mb-5">
-                <div>
-                  <h2 className="text-lg font-bold text-foreground">
-                    Truy cập nhanh
-                  </h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Các công cụ giảng dạy và quản lý thường dùng
-                  </p>
-                </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
-                {quickActions.map((item) => {
+              <div className="grid grid-cols-2 gap-3 p-5">
+                {cloudDockActions.map((item) => {
                   const Icon = item.icon;
                   return (
                     <button
                       key={item.href}
                       type="button"
                       onClick={() => router.push(item.href)}
-                      className={`group flex flex-col items-start p-4 rounded-2xl border border-border bg-background/50 hover:bg-surface ${item.hoverBorder} hover:shadow-ambient-sm transition-all duration-200 text-left cursor-pointer`}
+                      className={`group flex flex-col items-start rounded-2xl border bg-gradient-to-br p-3.5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xs cursor-pointer ${item.tileBg}`}
                     >
-                      <div
-                        className={`w-10 h-10 rounded-xl border flex items-center justify-center mb-3 group-hover:scale-105 transition-transform ${item.iconBg}`}
-                      >
-                        <Icon className="w-5 h-5" />
+                      <div className="mb-2.5 flex w-full items-center justify-between">
+                        <span
+                          className={`flex h-9 w-9 items-center justify-center rounded-xl border shadow-2xs transition-transform group-hover:scale-105 ${item.iconBg}`}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-all group-hover:translate-x-0.5 group-hover:text-primary group-hover:opacity-100" />
                       </div>
-                      <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
+                      <h3 className="text-sm font-semibold text-foreground transition-colors group-hover:text-primary">
                         {item.title}
                       </h3>
-                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
                         {item.description}
                       </p>
                     </button>
@@ -441,269 +302,47 @@ const LecturerDashboard = ({
               </div>
             </Card>
 
-            {/* Hiệu suất Khóa học Tiêu biểu */}
-            <Card className="rounded-[24px] border-border bg-surface p-6 shadow-xs">
-              <div className="flex items-center justify-between mb-5">
-                <div>
-                  <h2 className="text-lg font-bold text-foreground">
-                    Khóa học nổi bật
-                  </h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Hiệu suất các khóa học đang thu hút học viên nhất
-                  </p>
-                </div>
-                <Link
-                  href="/lecturer/courses"
-                  className="text-xs font-semibold text-primary hover:text-primary-hover inline-flex items-center gap-1 transition-colors"
-                >
-                  <span>Xem tất cả</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </Link>
-              </div>
+            {/* Hold Pulse Card */}
+            <HoldPulseCard holdCount={holdCount} />
 
-              {isLoadingCourses ? (
-                <div className="space-y-3">
-                  {[...Array(3)].map((_, idx) => (
-                    <Skeleton
-                      key={idx}
-                      variant="rect"
-                      className="h-16 w-full rounded-xl"
-                    />
-                  ))}
-                </div>
-              ) : topCourses.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border bg-background/60 py-10 px-4 text-center">
-                  <div className="w-12 h-12 rounded-2xl bg-primary-light text-primary flex items-center justify-center mx-auto mb-3">
-                    <BookOpen className="w-6 h-6" />
-                  </div>
-                  <p className="text-sm font-semibold text-foreground">
-                    Chưa có dữ liệu khóa học
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1 mb-4 max-w-sm mx-auto">
-                    Hãy tạo và xuất bản khóa học đầu tiên để bắt đầu tiếp cận
-                    hàng ngàn học sinh THPT trên StudyNest.
-                  </p>
-                  <Link href="/lecturer/courses/create">
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      leftIcon={<Plus className="w-4 h-4" />}
-                    >
-                      Tạo khóa học ngay
-                    </Button>
-                  </Link>
-                </div>
-              ) : (
-                <div className="divide-y divide-border/70">
-                  {topCourses.map((course) => (
-                    <Link
-                      key={course.course_id}
-                      href={`/lecturer/courses/${course.course_id}/stats`}
-                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3.5 first:pt-0 last:pb-0 group hover:bg-primary-light/20 -mx-2 px-2 rounded-xl transition-colors"
-                    >
-                      <div className="flex items-center gap-3.5 min-w-0">
-                        <img
-                          src={getImageUrl(
-                            course.thumbnail || "/logo/studynest-logo.svg"
-                          )}
-                          alt={course.title}
-                          className="w-16 h-11 rounded-lg object-cover bg-primary-light/50 border border-border shrink-0"
-                        />
-                        <div className="min-w-0">
-                          <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors truncate">
-                            {course.title}
-                          </h3>
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                            <span className="inline-flex items-center gap-1">
-                              <Users className="w-3.5 h-3.5 text-subtle-foreground" />
-                              {course.total_students} học viên
-                            </span>
-                            <span className="inline-flex items-center gap-1">
-                              <Star className="h-3.5 w-3.5 fill-current text-accent-vanilla-foreground" />
-                              {course.average_rating.toFixed(1)} (
-                              {course.reviews_count})
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pl-19 sm:pl-0">
-                        <div className="text-left sm:text-right">
-                          <p className="text-xs font-bold text-foreground">
-                            {formatCurrency(course.revenue)}
-                          </p>
-                          <p className="text-[11px] text-subtle-foreground">
-                            Tổng doanh thu
-                          </p>
-                        </div>
-                        <Badge
-                          variant={
-                            course.status === "published"
-                              ? "success"
-                              : "default"
-                          }
-                          size="sm"
-                        >
-                          {course.status === "published"
-                            ? "Đang bán"
-                            : "Bản nháp"}
-                        </Badge>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </Card>
-          </div>
-
-          {/* Cột Phải (4 cột): Ví + Hold + Bắt đầu nhanh */}
-          <div className="lg:col-span-4 space-y-6">
-            {/* Thẻ Ví Giảng Viên — Cloudy Blue Gradient */}
-            <div className="relative overflow-hidden rounded-[24px] bg-gradient-to-br from-primary via-primary-hover to-primary-active p-6 text-primary-foreground shadow-ambient-lg border border-primary-pastel/30">
-              {/* Họa tiết trang trí mềm */}
-              <div
-                className="pointer-events-none absolute -top-12 -right-12 w-36 h-36 rounded-full bg-white/10 blur-xl"
-                aria-hidden="true"
-              />
-
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-white/15 backdrop-blur-md flex items-center justify-center">
-                    <Wallet className="w-5 h-5" />
-                  </div>
-                  <h2 className="text-base font-bold">Ví của giảng viên</h2>
-                </div>
-                {wallet?.kyc_verified && (
-                  <span className="text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-white/20 backdrop-blur-sm">
-                    Đã xác minh
-                  </span>
-                )}
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <p className="text-xs text-primary-foreground/80">
-                    Số dư khả dụng
-                  </p>
-                  <p className="text-3xl font-bold tracking-tight mt-0.5">
-                    {wallet ? formatCurrency(wallet.balance) : "—"}
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-4 border-t border-white/20">
-                  <div>
-                    <p className="text-[11px] text-primary-foreground/75">
-                      Tổng thu nhập
-                    </p>
-                    <p className="text-sm font-semibold mt-0.5">
-                      {wallet ? formatCurrency(wallet.total_in) : "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-primary-foreground/75">
-                      Tổng đã rút
-                    </p>
-                    <p className="text-sm font-semibold mt-0.5">
-                      {wallet ? formatCurrency(wallet.total_out) : "—"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => router.push("/lecturer/wallets")}
-                    className="px-3.5 py-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-xs font-semibold transition-colors cursor-pointer text-center"
-                  >
-                    Chi tiết ví
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => router.push("/lecturer/withdraw/create")}
-                    className="px-3.5 py-2.5 rounded-xl bg-surface text-primary hover:bg-primary-light text-xs font-semibold transition-colors cursor-pointer text-center shadow-2xs"
-                  >
-                    Rút tiền
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Thẻ Giao dịch Đang Giữ (Hold) */}
-            <Card className="rounded-[24px] border-border bg-surface p-6 shadow-xs">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-base font-bold text-foreground">
-                  Giao dịch đang hold
-                </h2>
-                {holdCount > 0 && (
-                  <Badge variant="warning" size="sm">
-                    Chờ đối soát
-                  </Badge>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-primary-light/50 border border-primary-pastel/60 mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0">
-                    <Clock className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Số lượng giao dịch
-                    </p>
-                    <p className="text-2xl font-bold text-foreground">
-                      {holdCount}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <Button
-                variant="pastel"
-                size="md"
-                fullWidth
-                onClick={() => router.push("/lecturer/hold")}
-                rightIcon={<ArrowRight className="w-4 h-4" />}
+            {/* Legal Contract Trust Card */}
+            {contractStatus?.has_signed_master && (
+              <Card
+                variant="surface"
+                density="none"
+                className="overflow-hidden rounded-[28px] border border-primary-pastel/80 bg-gradient-to-br from-primary-light/60 via-surface to-success-bg/40 p-5 shadow-xs"
               >
-                Xem chi tiết giao dịch
-              </Button>
-            </Card>
-
-            {/* Thẻ Bắt đầu / Tài nguyên Giảng viên */}
-            <Card
-              variant="muted"
-              className="rounded-[24px] border-border p-6 shadow-xs"
-            >
-              <div className="flex items-start gap-3.5">
-                <div className="w-11 h-11 rounded-xl bg-primary-light text-primary border border-primary-pastel/60 flex items-center justify-center shrink-0">
-                  <BookOpen className="w-6 h-6" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-bold text-foreground">
-                    Mẹo giảng dạy hiệu quả
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-1 mb-4 leading-relaxed">
-                    Quản lý tập trung tài liệu PDF, video bài giảng và câu hỏi
-                    trắc nghiệm để tái sử dụng cho nhiều khóa học.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => router.push("/lecturer/resources")}
-                    >
-                      Kho tài nguyên
-                    </Button>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => router.push("/lecturer/courses/create")}
-                    >
-                      Tạo khóa mới
-                    </Button>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-primary-pastel bg-surface text-primary shadow-2xs">
+                      <ShieldCheck size={19} animated={false} />
+                    </span>
+                    <div className="min-w-0">
+                      <span className="inline-flex items-center gap-1 rounded-full border border-success-border bg-success-bg px-2 py-0.5 text-[10px] font-bold text-success-foreground">
+                        <CheckCircle2 size={10} animated={false} />
+                        {contractStatus.status === "countersigned"
+                          ? "Đã đồng ký 2 bên"
+                          : "Đã ký điện tử PKI"}
+                      </span>
+                      <h3 className="mt-1.5 text-sm font-bold text-foreground">
+                        Hợp đồng Đối tác Giảng viên
+                      </h3>
+                      <p className="mt-0.5 font-mono text-[11px] font-semibold text-primary">
+                        {contractStatus.contract_number}
+                      </p>
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/lecturer/contracts")}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-primary-pastel bg-surface px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary-light"
+                  >
+                    <FileText size={13} animated={false} />
+                    Xem A4
+                  </button>
                 </div>
-              </div>
-            </Card>
+              </Card>
+            )}
           </div>
         </div>
       </div>

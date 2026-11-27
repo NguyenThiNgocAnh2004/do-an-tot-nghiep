@@ -5,17 +5,26 @@ from typing import Optional
 from fastapi import (
     APIRouter,
     BackgroundTasks,
+    Body,
     Depends,
     Query,
+    Response,
     WebSocket,
     WebSocketDisconnect,
+    WebSocketException,
 )
 from fastapi.websockets import WebSocketState
 
-from app.core.deps import AuthorizationService
+from app.core.deps import AuthorizationService, receive_bounded_ws_text_async
 from app.core.ws_manager import ws_manager
 from app.schemas.auth.user import UserCreate
-from app.schemas.lecturer.lesson import LessonCodeSaveFile, LessonCodeUserTest
+from app.schemas.lecturer.lesson import (
+    LessonCodeSaveFile,
+    LessonCodeUserTest,
+    SpeakingEvaluateRequestSchema,
+    SpeakingInlineTTSSchema,
+    SpeakingTurnRequestSchema,
+)
 from app.schemas.user.learning import (
     CreateLessonComment,
     CreateLessonNote,
@@ -71,7 +80,7 @@ async def get_lesson_active(
         )
     )
     match lesson_type:
-        case "video" | "article":
+        case "video" | "article" | "flashcard" | "listening" | "fill_blank" | "speaking":
             return await learning_service.get_lesson_video_async(lesson_id, user)
         case "quiz":
             return await learning_service.get_lesson_quiz_async(lesson_id, user)
@@ -331,7 +340,9 @@ async def lesson_comment_ws(websocket: WebSocket, lesson_id: uuid.UUID):
     try:
         await websocket.accept()
 
-        user = await AuthorizationService.get_require_role_ws(websocket, ["USER"])
+        user = await AuthorizationService.get_require_role_ws(
+            websocket, ["USER", "LECTURER", "ADMIN"]
+        )
         if not user:
             return
 
@@ -341,7 +352,7 @@ async def lesson_comment_ws(websocket: WebSocket, lesson_id: uuid.UUID):
         while True:
             # nhận data client gửi lên
             try:
-                raw = await websocket.receive_text()
+                raw = await receive_bounded_ws_text_async(websocket)
                 data = json.loads(raw)
                 msg_type = data.get("type")
             except json.JSONDecodeError:
@@ -349,6 +360,9 @@ async def lesson_comment_ws(websocket: WebSocket, lesson_id: uuid.UUID):
                 continue
             except WebSocketDisconnect:
                 break  # client đóng kết nối
+            except WebSocketException as exc:
+                await websocket.close(code=exc.code)
+                break
             except Exception as e:
                 await send_safe({"error": f"Lỗi nhận dữ liệu: {e}"})
                 continue
@@ -478,3 +492,59 @@ async def get_code_test_attempt(
 ):
     user = await authorization.get_current_user()
     return await learning_service.get_code_test_result_async(attempt_id,user)
+
+
+@router.post("/speaking/tts-inline")
+async def speaking_tts_inline(
+    schema: SpeakingInlineTTSSchema = Body(...),
+    authorization: AuthorizationService = Depends(AuthorizationService),
+    learning_service: LearningService = Depends(LearningService),
+):
+    """Trả thẳng audio/mpeg từ 9Router TTS không upload R2 để tối ưu tốc độ phát (<1s)."""
+    await authorization.get_current_user()
+    mp3_bytes = await learning_service.speaking_tts_inline_async(schema)
+    return Response(content=mp3_bytes, media_type="audio/mpeg")
+
+
+@router.post("/speaking/voice-ticket")
+async def speaking_voice_ticket(
+    response: Response,
+    authorization: AuthorizationService = Depends(AuthorizationService),
+):
+    from app.services.user.tutor_voice import issue_tutor_voice_ticket_async
+
+    ticket = await issue_tutor_voice_ticket_async(authorization)
+    response.headers["Cache-Control"] = "no-store"
+    return {"ticket": ticket}
+
+
+@router.websocket("/speaking/{lesson_id}/realtime")
+async def speaking_roleplay_realtime(
+    websocket: WebSocket,
+    lesson_id: uuid.UUID,
+):
+    from app.services.user.speaking_realtime import run_speaking_realtime
+
+    await run_speaking_realtime(websocket, lesson_id)
+
+
+@router.post("/speaking/{lesson_id}/turn")
+async def speaking_roleplay_turn(
+    lesson_id: uuid.UUID,
+    schema: SpeakingTurnRequestSchema = Body(...),
+    authorization: AuthorizationService = Depends(AuthorizationService),
+    learning_service: LearningService = Depends(LearningService),
+):
+    user = await authorization.get_current_user()
+    return await learning_service.speaking_roleplay_turn_async(lesson_id, user, schema)
+
+
+@router.post("/speaking/{lesson_id}/evaluate")
+async def speaking_roleplay_evaluate(
+    lesson_id: uuid.UUID,
+    schema: SpeakingEvaluateRequestSchema = Body(...),
+    authorization: AuthorizationService = Depends(AuthorizationService),
+    learning_service: LearningService = Depends(LearningService),
+):
+    user = await authorization.get_current_user()
+    return await learning_service.speaking_roleplay_evaluate_async(lesson_id, user, schema)

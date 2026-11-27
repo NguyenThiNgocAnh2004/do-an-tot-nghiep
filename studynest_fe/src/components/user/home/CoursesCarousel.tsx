@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui";
 import { CoursesCarouselProps } from "@/types/user/course";
 import { memo, useMemo } from "react";
-import { HiChevronLeft, HiChevronRight } from "react-icons/hi";
+import { ChevronLeft, ChevronRight } from "pulsoicon-react";
 import CourseCard from "./CourseCard";
 import SkeletonCard from "./SkeletonCard";
 
@@ -109,7 +109,7 @@ const CoursesCarousel = memo(
                 aria-label="Trang trước"
                 className="rounded-full w-11 h-11 hover:bg-primary hover:text-primary-foreground hover:border-primary"
               >
-                <HiChevronLeft className="h-5 w-5" />
+                <ChevronLeft className="h-5 w-5" />
               </Button>
               <Button
                 variant="secondary"
@@ -120,14 +120,14 @@ const CoursesCarousel = memo(
                 aria-label="Trang tiếp theo"
                 className="rounded-full w-11 h-11 hover:bg-primary hover:text-primary-foreground hover:border-primary"
               >
-                <HiChevronRight className="h-5 w-5" />
+                <ChevronRight className="h-5 w-5" />
               </Button>
             </div>
           </div>
 
           <div className="relative overflow-hidden">
             {isLoadingFeeds ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {skeletonCards}
               </div>
             ) : (
@@ -137,7 +137,7 @@ const CoursesCarousel = memo(
               >
                 {Array.from({ length: totalPages }).map((_, pageIndex) => (
                   <div key={pageIndex} className="w-full flex-shrink-0">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                       {(items?.length ? items : [])
                         .slice(
                           pageIndex * itemsPerPage,
@@ -155,7 +155,7 @@ const CoursesCarousel = memo(
                 ))}
                 {isFetchingMore && (
                   <div className="w-full flex-shrink-0">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                       {fetchingSkeletonCards}
                     </div>
                   </div>

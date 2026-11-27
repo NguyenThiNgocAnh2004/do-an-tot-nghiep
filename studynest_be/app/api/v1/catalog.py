@@ -1,40 +1,108 @@
+from asyncio import timeout
+from hashlib import sha256
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
+from pydantic import ValidationError
+from redis.exceptions import RedisError
 from sqlalchemy import select
 
 from app.core.deps import AuthorizationService
+from app.core.redis import get_redis
 from app.db.models.database import Courses
 from app.schemas.catalog import (
     BrowseFiltersResponse,
+    CatalogAiEnrichInput,
+    CatalogAiEnrichResponse,
     CatalogCoursesResponse,
     CatalogFilters,
+    CatalogMatrixToggleInput,
+    CatalogOptionsResponse,
+    CatalogQuickUpdateInput,
+    CatalogReorderInput,
     CourseTaxonomy,
     TaxonomyInput,
 )
+from app.schemas.catalog_combos import CatalogComboFilters, CatalogCombosResponse
 from app.services.catalog import CatalogService, public_course
+from app.services.catalog_combos import cache_seconds, catalog_combos
 
 router = APIRouter(tags=["Education Catalog V2"])
 CATALOG_DEP = Depends(CatalogService)
 AUTH_DEP = Depends(AuthorizationService)
+COURSES_CACHE_TTL = 60
 
 
-@router.get("/catalog/filters")
-async def filters(service: CatalogService = CATALOG_DEP):
-    return await service.filters()
+@router.get(
+    "/catalog/filters",
+    response_model=CatalogOptionsResponse,
+    response_model_exclude_unset=True,
+)
+async def filters(
+    response: Response,
+    include_course_counts: bool = False,
+    service: CatalogService = CATALOG_DEP,
+):
+    options = await service.filters()
+    if include_course_counts:
+        options["course_counts"] = await service.course_counts()
+        response.headers["Cache-Control"] = "public, max-age=30"
+    return options
 
 
 @router.get("/catalog/courses", response_model=CatalogCoursesResponse)
 async def courses(
-    filters: Annotated[CatalogFilters, Query()], service: CatalogService = CATALOG_DEP
-):
-    return await service.courses(filters)
+    filters: Annotated[CatalogFilters, Query()],
+    response: Response,
+    service: CatalogService = CATALOG_DEP,
+) -> CatalogCoursesResponse:
+    if filters.cursor is not None or filters.keyword:
+        response.headers["Cache-Control"] = "no-store"
+        return CatalogCoursesResponse.model_validate(
+            await service.courses(filters, include_card_details=True)
+        )
+
+    response.headers["Cache-Control"] = "public, max-age=30"
+    key = "catalog:courses:v1:" + sha256(filters.model_dump_json().encode()).hexdigest()
+    redis = get_redis()
+    can_cache = True
+    try:
+        async with timeout(0.25):
+            cached = await redis.get(key)
+        if cached is not None:
+            return CatalogCoursesResponse.model_validate_json(cached)
+    except (RedisError, TimeoutError):
+        can_cache = False
+    except ValidationError:
+        pass
+
+    result = CatalogCoursesResponse.model_validate(
+        await service.courses(filters, include_card_details=True)
+    )
+    if can_cache:
+        try:
+            async with timeout(0.25):
+                await redis.set(key, result.model_dump_json(), ex=COURSES_CACHE_TTL)
+        except (RedisError, TimeoutError):
+            pass
+    return result
 
 
 @router.get("/catalog/browse-filters", response_model=BrowseFiltersResponse)
 async def browse_filters(service: CatalogService = CATALOG_DEP):
     return await service.browse_filters()
+
+
+@router.get("/catalog/combos", response_model=CatalogCombosResponse)
+async def combos(
+    response: Response,
+    filters: Annotated[CatalogComboFilters, Query()],
+    service: CatalogService = CATALOG_DEP,
+):
+    result = await catalog_combos(service.db, filters)
+    response.headers["Cache-Control"] = f"public, max-age={min(30, cache_seconds(result))}"
+    return result
 
 
 @router.get("/catalog/courses/{course_id}/taxonomy")
@@ -116,6 +184,62 @@ async def taxonomy(
         )
         rows = [r for r in rows if r["id"] in ids]
     return rows
+
+
+@router.get("/admin/catalog/overview")
+async def admin_catalog_overview(
+    service: CatalogService = CATALOG_DEP,
+    auth: AuthorizationService = AUTH_DEP,
+):
+    await auth.require_role(["ADMIN"])
+    return await service.admin_overview()
+
+
+@router.post("/admin/catalog/matrix/toggle")
+async def admin_matrix_toggle(
+    data: CatalogMatrixToggleInput,
+    service: CatalogService = CATALOG_DEP,
+    auth: AuthorizationService = AUTH_DEP,
+):
+    await auth.require_role(["ADMIN"])
+    return await service.toggle_matrix(data.grade_ids, data.subject_id, data.enabled)
+
+
+@router.post("/admin/catalog/ai-enrich", response_model=CatalogAiEnrichResponse)
+async def admin_catalog_ai_enrich(
+    data: CatalogAiEnrichInput,
+    service: CatalogService = CATALOG_DEP,
+    auth: AuthorizationService = AUTH_DEP,
+):
+    await auth.require_role(["ADMIN"])
+    return await service.ai_enrich_taxonomy(
+        data.kind, data.name, data.code, data.exam_type
+    )
+
+
+@router.put("/admin/catalog/{kind}/reorder")
+async def admin_reorder_taxonomy(
+    kind: str,
+    data: CatalogReorderInput,
+    service: CatalogService = CATALOG_DEP,
+    auth: AuthorizationService = AUTH_DEP,
+):
+    await auth.require_role(["ADMIN"])
+    return await service.reorder_taxonomy(kind, data.ids)
+
+
+@router.patch("/admin/catalog/{kind}/{item_id}/quick")
+async def admin_quick_update_taxonomy(
+    kind: str,
+    item_id: UUID,
+    data: CatalogQuickUpdateInput,
+    service: CatalogService = CATALOG_DEP,
+    auth: AuthorizationService = AUTH_DEP,
+):
+    await auth.require_role(["ADMIN"])
+    return await service.quick_update(
+        kind, item_id, is_active=data.is_active, is_featured=data.is_featured
+    )
 
 
 @router.get("/admin/catalog/{kind}")

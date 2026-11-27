@@ -1,18 +1,22 @@
 "use client";
 
+import { useUrlQueryState } from "@/hooks/useUrlQueryState";
 import api from "@/lib/utils/fetcher/client/axios";
 import { formatDate, formatDuration } from "@/lib/utils/helpers/date";
 import { getImageUrl } from "@/lib/utils/helpers/image";
 import { CoursesMeResponse } from "@/types/user/courses-me";
 import Link from "next/link";
-import { useState } from "react";
-import { HiAcademicCap, HiOutlineStar } from "react-icons/hi";
+import { GraduationCap, Star } from "pulsoicon-react";
 import useSWR from "swr";
 
 interface ProfileCoursesProps {
   userId: string;
   isOwnProfile: boolean;
 }
+
+const PROFILE_COURSES_QUERY_SCHEMA = {
+  page: { type: "number", default: 1, min: 1 },
+} as const;
 
 const fallbackThumbnail =
   "https://placehold.co/600x400/0fbba7/FFFFFF?text=Study+Course";
@@ -32,7 +36,8 @@ export default function ProfileCourses({
   userId,
   isOwnProfile,
 }: ProfileCoursesProps) {
-  const [page, setPage] = useState(1);
+  const { values, setParam } = useUrlQueryState(PROFILE_COURSES_QUERY_SCHEMA);
+  const { page } = values;
   const pageSize = 9;
 
   // Chỉ fetch courses đã mua nếu là profile của chính mình
@@ -92,7 +97,7 @@ export default function ProfileCourses({
           Khóa học đã mua
         </h3>
         <div className="text-center py-8">
-          <HiAcademicCap className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <GraduationCap className="w-16 h-16 text-gray-400 mx-auto mb-4" />
           <p className="text-gray-600">Chưa có khóa học nào</p>
         </div>
       </div>
@@ -141,7 +146,7 @@ export default function ProfileCourses({
                     </h3>
                     <div className="flex items-center gap-3 text-sm text-slate-500">
                       <span className="inline-flex items-center gap-1">
-                        <HiOutlineStar className="h-4 w-4 text-amber-400" />
+                        <Star className="h-4 w-4 text-amber-400" />
                         {course.rating_avg.toFixed(1)}
                         <span className="text-xs text-slate-400">
                           ({course.review_count})
@@ -191,7 +196,7 @@ export default function ProfileCourses({
       {totalPages > 1 && (
         <div className="mt-6 flex items-center justify-center gap-2">
           <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => setParam("page", Math.max(1, page - 1))}
             disabled={page === 1}
             className="px-4 py-2 bg-green-50 text-green-700 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-100 transition-colors"
           >
@@ -201,7 +206,7 @@ export default function ProfileCourses({
             Trang {page} / {totalPages}
           </span>
           <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            onClick={() => setParam("page", Math.min(totalPages, page + 1))}
             disabled={page === totalPages}
             className="px-4 py-2 bg-green-50 text-green-700 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-100 transition-colors"
           >

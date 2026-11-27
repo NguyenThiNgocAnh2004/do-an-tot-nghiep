@@ -1,22 +1,27 @@
 "use client";
 
+import { useUrlQueryState } from "@/hooks/useUrlQueryState";
 import api from "@/lib/utils/fetcher/client/axios";
 import {
   TransactionsListResponse,
   TransactionStatus,
 } from "@/types/admin/statistics";
-import { useState } from "react";
 import useSWR from "swr";
-import { HiSearch, HiChevronLeft, HiChevronRight } from "react-icons/hi";
+import { ChevronLeft, ChevronRight } from "pulsoicon-react";
 
-const formatCurrency = (value: number | null | undefined) => {
-  if (value === null || value === undefined || isNaN(value)) return "0 ₫";
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
-};
+const REVENUE_TRANSACTIONS_QUERY_SCHEMA = {
+  page: { type: "number", default: 1, min: 1 },
+  size: { type: "number", default: 10, min: 1, max: 100 },
+  status: {
+    type: "string",
+    default: "all" as TransactionStatus | "all",
+    allowed: ["all", "completed", "pending", "refunded"] as const,
+  },
+} as const;
+
+import { formatVndAsCoin } from "@/lib/learning-hub/coin-logic";
+
+const formatCurrency = (value: number | null | undefined) => formatVndAsCoin(value);
 
 const formatDateTime = (value: string) => {
   return new Date(value).toLocaleDateString("vi-VN", {
@@ -58,9 +63,10 @@ const getStatusBadge = (status: string) => {
 };
 
 export default function RevenueTransactions() {
-  const [page, setPage] = useState(1);
-  const [size, setSize] = useState(10);
-  const [status, setStatus] = useState<TransactionStatus | "all">("all");
+  const { values, setParam, setParams } = useUrlQueryState(
+    REVENUE_TRANSACTIONS_QUERY_SCHEMA
+  );
+  const { page, size, status } = values;
 
   const buildQuery = () => {
     const params = new URLSearchParams();
@@ -92,8 +98,7 @@ export default function RevenueTransactions() {
           <select
             value={status}
             onChange={(e) => {
-              setStatus(e.target.value as any);
-              setPage(1);
+              setParam("status", e.target.value as TransactionStatus | "all");
             }}
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
           >
@@ -105,8 +110,7 @@ export default function RevenueTransactions() {
           <select
             value={size}
             onChange={(e) => {
-              setSize(Number(e.target.value));
-              setPage(1);
+              setParams({ size: Number(e.target.value), page: 1 });
             }}
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
           >
@@ -210,11 +214,12 @@ export default function RevenueTransactions() {
               </p>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setPage(Math.max(1, page - 1))}
+                  aria-label="Trang trước"
+                  onClick={() => setParam("page", Math.max(1, page - 1))}
                   disabled={page === 1}
                   className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <HiChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                   let pageNum = i + 1;
@@ -227,7 +232,7 @@ export default function RevenueTransactions() {
                   return (
                     <button
                       key={pageNum}
-                      onClick={() => setPage(pageNum)}
+                      onClick={() => setParam("page", pageNum)}
                       className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
                         pageNum === page
                           ? "bg-green-600 text-white"
@@ -239,11 +244,12 @@ export default function RevenueTransactions() {
                   );
                 })}
                 <button
-                  onClick={() => setPage(Math.min(totalPages, page + 1))}
+                  aria-label="Trang sau"
+                  onClick={() => setParam("page", Math.min(totalPages, page + 1))}
                   disabled={page === totalPages}
                   className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <HiChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
             </div>

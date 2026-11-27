@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -29,13 +30,16 @@ class Settings(BaseSettings):
     TUTOR_CHAT_MODEL: str = ""
     TUTOR_TRANSCRIBE_PROVIDER: Literal["gemini", "9router"] = "gemini"
     TUTOR_DICTATION_ENABLED: bool = True
-    TUTOR_DICTATION_MODEL: str = "grok-voice-transcribe-2.0"
+    TUTOR_DICTATION_MODEL: str = "qwen3-asr-flash-realtime"
     TUTOR_DICTATION_MAX_SECONDS: int = 120
     TUTOR_TRANSCRIBE_MODEL: str = "gemini-3.1-flash-lite"
-    XAI_API_KEY: str = ""
+    DASHSCOPE_API_KEY: str = ""
+    DASHSCOPE_WS_URL: str = "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"
+    DASHSCOPE_COMPATIBLE_BASE_URL: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    DASHSCOPE_CHAT_MODEL: str = "qwen3.8-omni-flash"
     TUTOR_VOICE_ENABLED: bool = True
-    TUTOR_VOICE_MODEL: str = "grok-voice-latest"
-    TUTOR_VOICE_NAME: str = "eve"
+    TUTOR_VOICE_MODEL: str = "qwen3.8-omni-flash-realtime"
+    TUTOR_VOICE_NAME: str = "Tina"
     TUTOR_VOICE_MAX_SECONDS: int = 600
     TUTOR_VOICE_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
     EMBEDDING_PROVIDER: str = "gemini"
@@ -54,18 +58,21 @@ class Settings(BaseSettings):
     AGENT_MODEL: str = ""
     AGENT_VISION_PROVIDER: str = "gemini"
     AGENT_VISION_MODEL: str = "gemini-3.1-flash-lite"
-    AGENT_RUN_MAX_SECONDS: int = 240
+    AGENT_RUN_MAX_SECONDS: int = 1800
     AGENT_MODEL_TIMEOUT_SECONDS: float = 90
-    AGENT_MAX_TOOL_CALLS: int = 12
+    AGENT_MAX_TOOL_CALLS: int = 0  # không dùng: agent không giới hạn số lần gọi tool
     AGENT_MAX_RUNS_PER_MINUTE: int = 20
     AGENT_MAX_SESSIONS_PER_HOUR: int = 60
-    AGENT_MAX_ITERATIONS: int = 6
+    AGENT_MAX_ITERATIONS: int = 0  # không dùng: agent không giới hạn số vòng lặp
     AGENT_MAX_INPUT_TOKENS: int = 8000000
-    AGENT_MAX_OUTPUT_TOKENS_TOTAL: int = 12000
+    AGENT_MAX_OUTPUT_TOKENS_TOTAL: int = 100_000_000
     AGENT_MAX_RUN_COST_USD: float | None = None
     AGENT_MODEL_PRICES_JSON: str = "{}"
     AGENT_EVENT_RETENTION_DAYS: int = 30
     AGENT_MCP_ENABLED: bool = True
+    MISSION_COUPON_REWARDS_ENABLED: bool = False
+    LEVEL_COUPON_REWARDS_ENABLED: bool = False
+
     CODE_MAX_RUNS_PER_MINUTE: int = 6
     CODE_MAX_SECONDS: int = 90
 
@@ -87,7 +94,16 @@ class Settings(BaseSettings):
     # JWT
     SECRET_KEY: str = ""
     JWT_SECRET: str = ""
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10
+    AUTH_ALLOW_COOKIE_COMPAT: bool = True
+    AUTH_ALLOW_UNBOUND_BEARER: bool = True
+    AUTH_INTERNAL_REFRESH_SECRET: str = Field(default="", repr=False)
+    PUBLIC_API_URL: str = ""
+    # Set only when the upstream ASGI path omits the public prefix.
+    DPOP_STRIPPED_PUBLIC_PATH_PREFIX: str = Field(default="", pattern=r"^(?:/[A-Za-z0-9_-]+)*$")
+    DPOP_IAT_LEEWAY_SECONDS: int = Field(default=60, gt=0)
+    DPOP_JTI_TTL_SECONDS: int = Field(default=120, gt=0)
+    DPOP_JTI_FAIL_OPEN_ON_GET: bool = False
     ALGORITHM: str = "HS256"
 
     # Mail
@@ -117,6 +133,8 @@ class Settings(BaseSettings):
     PAYPAL_CLIENT_ID: str = ""
     PAYPAL_CLIENT_SECRET: str = ""
     PAYPAL_BASE_URL: str = ""
+    # Địa chỉ quay về của "Log in with PayPal"; để trống thì dùng BACKEND_URL + /api/v1/lecturer/payout/callback.
+    PAYPAL_REDIRECT_URI: str = ""
     # PAYPAL_WEBHOOK_ID: str = ""
 
     CORS_ALLOWED_ORIGINS: str = ""

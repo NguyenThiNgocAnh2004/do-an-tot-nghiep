@@ -3,18 +3,13 @@
 import api from "@/lib/utils/fetcher/client/axios";
 import { RevenueByInstructorResponse } from "@/types/admin/statistics";
 import { getImageUrl } from "@/lib/utils/helpers/image";
-import { HiUser, HiCalendar } from "react-icons/hi";
+import { User, Calendar } from "pulsoicon-react";
 import { useState } from "react";
 import useSWR from "swr";
 
-const formatCurrency = (value: number | null | undefined) => {
-  if (value === null || value === undefined || isNaN(value)) return "0 ₫";
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
-};
+import { formatVndAsCoin } from "@/lib/learning-hub/coin-logic";
+
+const formatCurrency = (value: number | null | undefined) => formatVndAsCoin(value);
 
 export default function InstructorRevenue() {
   const [fromDate, setFromDate] = useState(() => {
@@ -45,7 +40,7 @@ export default function InstructorRevenue() {
         </h3>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-sm">
-            <HiCalendar className="w-4 h-4 text-gray-500" />
+            <Calendar className="w-4 h-4 text-gray-500" />
             <input
               type="date"
               value={fromDate}
@@ -140,7 +135,7 @@ export default function InstructorRevenue() {
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center bg-green-100">
-                            <HiUser className="w-4 h-4 text-green-600" />
+                            <User animated={false} className="w-4 h-4 text-green-600" />
                           </div>
                         )}
                       </div>

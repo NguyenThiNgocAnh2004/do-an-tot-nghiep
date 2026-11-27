@@ -1,3 +1,4 @@
+from contextlib import suppress
 """Native application tools. Models choose names; code owns permissions and effects."""
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal
@@ -192,7 +193,7 @@ async def course(ctx, args):
     value = await ctx.db.scalar(select(Courses).where(Courses.id == args.course_id, public_course()))
     if value is None:
         raise HTTPException(404, "Không tìm thấy khóa học công khai")
-    return {"id": str(value.id), "title": value.title, "description": (value.description or "")[:7000],
+    return {"id": str(value.id), "slug": value.slug, "url_path": f"/courses/{value.slug}", "learning_path": f"/learning/{value.slug}", "title": value.title, "description": (value.description or "")[:7000],
             "outcomes": value.outcomes or [], "requirements": value.requirements or [],
             "target_audience": value.target_audience or [], "price": str(value.base_price),
             "currency": value.currency, "taxonomy": await CatalogService(ctx.db).course_taxonomy(value.id)}
@@ -202,7 +203,13 @@ async def courses(ctx, args):
     from app.schemas.catalog import CatalogFilters
     from app.services.catalog import CatalogService
     filters = CatalogFilters(keyword=args.query, grade=args.grade, subject=args.subject, max_price=args.max_price, limit=5)
-    return await CatalogService(ctx.db).courses(filters)
+    res = await CatalogService(ctx.db).courses(filters)
+    if isinstance(res, dict) and isinstance(res.get("items"), list):
+        for item in res["items"]:
+            if isinstance(item, dict) and item.get("slug"):
+                item["url_path"] = f"/courses/{item['slug']}"
+                item["learning_path"] = f"/learning/{item['slug']}"
+    return res
 
 
 async def exercise(ctx, args):
@@ -224,7 +231,7 @@ def available(session):
     return {name: tool for name, tool in REGISTRY.items()
             if (not tool.client or name in capabilities)
             and (not name.startswith('mcp.') or settings.AGENT_MCP_ENABLED)
-            and (session.lesson_id is not None or name.startswith(("catalog.", "memory.", "data.", "mcp.", "tools.")))}
+            and (session.lesson_id is not None or name.startswith(("catalog.", "memory.", "data.", "mcp.", "tools.", "api.")))}
 
 
 for tool in [
@@ -364,6 +371,32 @@ async def github_connection_status(ctx, args):
 register(ToolDefinition('data.github_connection', 'Kiểm tra tài khoản GitHub đang liên kết, không đọc token. Dùng để trả lời đã connect chưa.', Empty, handler=github_connection_status))
 
 
+class ApiSearch(Contract):
+    query: str = Field(min_length=2, max_length=200)
+
+
+class ApiCall(Contract):
+    method: Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] = 'GET'
+    path: str = Field(min_length=1, max_length=500)
+    query: dict[str, Any] | None = None
+    body: dict[str, Any] | None = None
+
+
+async def api_search(ctx, args):
+    from app.agent.api_gateway import search_operations
+    return {'operations': search_operations(args.query), 'notice': 'Danh sách lấy từ API thật của ứng dụng. Mục có "blocked" là việc Mây Mây không được làm.'}
+
+
+async def api_call(ctx, args):
+    from app.agent.api_gateway import call_api
+    principal = {'user_id': ctx.user.id, 'sid': UUID(ctx.auth_sid)}
+    return await call_api(principal, args.method, args.path, args.query, args.body)
+
+
+register(ToolDefinition('api.search', 'Tìm trong API thật của ứng dụng (OpenAPI) thao tác phù hợp với việc cần làm: ghi chú, hồ sơ, thông báo, yêu thích, khóa học, hội thoại, giảng viên... Tính năng mới thêm vào API sẽ tự xuất hiện ở đây, không cần tool riêng. Trả method, path, tham số, body.', ApiSearch, handler=api_search))
+register(ToolDefinition('api.call', 'Gọi một thao tác API của ứng dụng đúng quyền của người dùng (path như /learning/{lesson_id}/notes, không cần /api/v1). Dùng sau api.search. Tiền, mua/đăng ký, mở khóa, phần thưởng và tiến độ học bị chặn ở máy chủ. Đọc (GET) thì mở.', ApiCall, risk='write', timeout_seconds=40, handler=api_call))
+
+
 class AttemptTarget(Contract):
     attempt_id: UUID
 
@@ -393,6 +426,12 @@ async def quiz_result(ctx,args):
 
 class QuizResultInput(Contract):
     attempt_id: UUID | None = None
+
+
+class QuizOptionSelect(Contract):
+    option_index: int = Field(ge=0, le=15)
+    question_id: UUID | None = None
+
 
 
 async def compare_courses(ctx,args):
@@ -439,11 +478,16 @@ REGISTRY['data.query_account'] = ToolDefinition(
 )
 
 
-from app.agent.workspace_mcp import BrowserTarget, BrowserFill, BashCommand, bash_handler
+from app.agent.workspace_mcp import BrowserTarget, BrowserFill, BrowserScroll, BrowserHighlight, BrowserNavigate, BashCommand, bash_handler
 for tool in [
-    ToolDefinition('mcp.browser_snapshot','Đọc DOM và ID điều khiển thật. Dùng trước khi mở trang/khóa học hay nhấn nút bằng browser_click; không đọc desktop/cookie/iframe khác nguồn.',Empty,client=True),
-    ToolDefinition('mcp.browser_click','Nhấn điều khiển hiển thị theo snapshot_id/target_id vừa đọc khi người dùng yêu cầu. Không dùng cho thanh toán, xóa, nộp bài hoặc đổi tài khoản.',BrowserTarget,risk='navigation',requires_approval=True,client=True),
+    ToolDefinition('mcp.browser_snapshot','Đọc DOM, danh sách điều khiển và đường dẫn (href) đang hiển thị trên màn hình. Dùng trước khi nhấn nút, khoanh vùng highlight hoặc cuộn tới phần tử; không đọc desktop/cookie/iframe khác nguồn.',Empty,client=True),
+    ToolDefinition('mcp.browser_click','Nhấn điều khiển hiển thị theo snapshot_id/target_id vừa đọc khi người dùng yêu cầu. Không dùng cho thanh toán, xóa, nộp bài hoặc đổi tài khoản.',BrowserTarget,risk='navigation',requires_approval=False,client=True),
+    ToolDefinition('mcp.browser_navigate','Điều hướng trực tiếp màn hình tới một đường dẫn nội bộ (ví dụ /courses/<slug>, /learning/<slug>, /courses, /dashboard) khi người dùng yêu cầu mở/truy cập trang hoặc khóa học.',BrowserNavigate,risk='navigation',requires_approval=False,client=True),
     ToolDefinition('mcp.browser_fill','Điền trường văn bản không nhạy cảm theo ID vừa đọc; cần xác nhận, không tự gửi form.',BrowserFill,risk='write',requires_approval=True,client=True),
+    ToolDefinition('mcp.browser_scroll','Cuộn màn hình học tập lên/xuống/đầu/cuối hoặc cuộn mượt tới một target_id trong snapshot hiện tại.',BrowserScroll,risk='navigation',requires_approval=False,client=True),
+    ToolDefinition('mcp.browser_highlight','Khoanh vùng sáng (Telekinesis Spotlight) và gắn chú thích trực tiếp lên phần tử target_id trên màn hình để chỉ điểm cho học viên.',BrowserHighlight,risk='navigation',requires_approval=False,client=True),
+    ToolDefinition('quiz.get_state','Đọc câu hỏi trắc nghiệm và các lựa chọn đang hiển thị trên màn hình học viên (không tiết lộ đáp án ẩn của server).',Empty,client=True),
+    ToolDefinition('quiz.select_option','Chọn giúp một phương án trắc nghiệm trên giao diện theo option_index (0=A, 1=B, 2=C, 3=D) khi học viên yêu cầu; không tự nộp bài.',QuizOptionSelect,risk='navigation',requires_approval=False,client=True),
     ToolDefinition('mcp.bash','Chạy Bash trong workspace sandbox tạm, đọc/xử lý các tệp được gửi trong files. Không shell máy chủ, không mạng/app credentials và không chứng minh điểm bài học.',BashCommand,risk='write',timeout_seconds=25,handler=bash_handler),
 ]:
     register(tool)

@@ -7,17 +7,14 @@ import {
   LecturerRefundRequestItem,
   LecturerRefundRequestsQuery,
 } from "@/types/lecturer/refund";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp } from "pulsoicon-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
+import { formatVndAsCoin } from "@/lib/learning-hub/coin-logic";
+
+const formatCurrency = (value: number) => formatVndAsCoin(value);
 
 const formatDateTime = (value: string | null) => {
   if (!value) return "—";

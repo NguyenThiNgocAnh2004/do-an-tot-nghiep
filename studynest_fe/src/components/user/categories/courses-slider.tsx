@@ -4,7 +4,7 @@ import api from "@/lib/utils/fetcher/client/axios";
 import { Course, FeedResponse } from "@/types/user/course";
 import useSWR from "swr";
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { HiChevronLeft, HiChevronRight } from "react-icons/hi";
+import { ChevronLeft, ChevronRight } from "pulsoicon-react";
 import CourseCard from "@/components/user/home/CourseCard";
 import SkeletonCard from "@/components/user/home/SkeletonCard";
 import useEmblaCarousel from "embla-carousel-react";
@@ -129,7 +129,7 @@ const CoursesSlider = ({
         </div>
 
         {isLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {Array.from({ length: 4 }).map((_, i) => (
               <SkeletonCard key={i} />
             ))}
@@ -142,7 +142,7 @@ const CoursesSlider = ({
               className={`${navBtnClass} left-0`}
               aria-label="Slide trước"
             >
-              <HiChevronLeft className="h-5 w-5 md:h-6 md:w-6" />
+              <ChevronLeft className="h-5 w-5 md:h-6 md:w-6" />
             </button>
             <div className="overflow-hidden" ref={emblaRef}>
               <div className="flex gap-6">
@@ -171,7 +171,7 @@ const CoursesSlider = ({
               className={`${navBtnClass} right-0`}
               aria-label="Slide tiếp theo"
             >
-              <HiChevronRight className="h-5 w-5 md:h-6 md:w-6" />
+              <ChevronRight className="h-5 w-5 md:h-6 md:w-6" />
             </button>
           </div>
         ) : (

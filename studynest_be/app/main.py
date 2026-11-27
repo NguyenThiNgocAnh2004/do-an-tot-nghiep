@@ -12,6 +12,8 @@ from fastapi_pagination import add_pagination
 # --- ADMIN ROUTES ---
 from app.api.v1 import catalog, learning_paths, bundle_management
 from app.api.v1.admin import category as admin_category
+from app.api.v1.admin import contracts as admin_contracts
+from app.api.v1.admin import courses as admin_courses
 from app.api.v1.admin import discounts as admin_discounts
 from app.api.v1.admin import lecturer as admin_lecturer
 from app.api.v1.admin import platform_wallet_service, role
@@ -31,6 +33,7 @@ from app.api.v1.chat.user import profile as chat_profile_user
 
 # --- LECTURER ROUTES ---
 from app.api.v1.lecturer import chapter, lesson
+from app.api.v1.lecturer import contracts as lecturer_contracts
 from app.api.v1.lecturer import courses as lecturer_courses
 from app.api.v1.lecturer import discounts as lecturer_discounts
 from app.api.v1.lecturer import payout as lecturer_payout
@@ -43,7 +46,7 @@ from app.api.v1.lecturer import withdraw as lecturer_withdraw
 # share
 from app.api.v1.shares import auth, location, notification, profile, upload
 from app.api.v1.shares import storage as file_storage
-from app.api.v1.user import category, favorites, learning, learning_menu, user_preferences, wallets
+from app.api.v1.user import category, coins, favorites, learning, learning_hub, learning_menu, user_preferences, wallets
 from app.api.v1.user import chat_sql as user_chat_sql
 from app.api.v1.user import course_enroll as course_enroll
 from app.api.v1.user import courses as user_courses
@@ -56,12 +59,18 @@ from app.api.v1.user import agent as user_agent
 from app.api.v1.user import agent_memory, agent_advisor
 
 # --- GAMIFICATION ROUTES ---
+from app.api.v1.gamification import badges as gamification_badges
 from app.api.v1.gamification import daily_checkin as gamification_checkin
+from app.api.v1.gamification import leaderboard as gamification_leaderboard
+from app.api.v1.gamification import missions as gamification_missions
 from app.api.v1.gamification import profile as gamification_profile
+from app.api.v1.gamification import shop as gamification_shop
 from app.api.v1.gamification import streak as gamification_streak
 from app.api.v1.gamification import websocket as gamification_ws
 from app.core.scheduler import scheduler, start_scheduler
 from app.core.redis import close_redis, ping_redis
+from app.core.security import AuthError, auth_error_response
+from app.core.settings import settings
 
 # --- MIDDLEWARE ---
 from app.middleware.request_context import RequestContextMiddleware
@@ -148,12 +157,13 @@ app = FastAPI(
     description="API quản lý học tập, khóa học, lộ trình và combo của Mây Mây.",
     version="0.1.0",
     lifespan=lifespan,
-    swagger_ui_parameters={"withCredentials": True},  # 🔑 Cho phép Swagger gửi cookie
+    swagger_ui_parameters={"withCredentials": settings.AUTH_ALLOW_COOKIE_COMPAT},
 )
 
 # --- CORS: explicit browser origins; bearer native clients need no Origin. ---
 from urllib.parse import urlsplit
-from app.core.settings import settings
+
+app.add_exception_handler(AuthError, auth_error_response)
 origins = {"http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001", "http://localhost:19006"}
 origins.update(value.strip().rstrip('/') for value in settings.CORS_ALLOWED_ORIGINS.split(',') if value.strip())
 if settings.FRONTEND_URL:
@@ -164,9 +174,9 @@ if "*" in origins:
     raise ValueError("CORS_ALLOWED_ORIGINS must contain explicit origins")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=sorted(origins), allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
-    expose_headers=["Content-Disposition", "X-Request-ID"],
+    allow_origins=sorted(origins), allow_credentials=settings.AUTH_ALLOW_COOKIE_COMPAT,
+    allow_methods=["*"], allow_headers=["*", "DPoP"],
+    expose_headers=["Content-Disposition", "X-Request-ID", "WWW-Authenticate"],
 )
 
 app.add_middleware(RequestContextMiddleware)
@@ -181,6 +191,7 @@ app.include_router(bundle_management.router, prefix=prefix)
 app.include_router(auth.router, prefix=prefix)
 app.include_router(location.router, prefix=prefix)
 app.include_router(wallets.router, prefix=prefix)
+app.include_router(coins.router, prefix=prefix)
 app.include_router(notification.router, prefix=prefix)
 app.include_router(upload.router, prefix=prefix)
 app.include_router(file_storage.router, prefix=prefix)
@@ -193,6 +204,7 @@ app.include_router(course_enroll.router, prefix=prefix)
 app.include_router(favorites.router, prefix=prefix)
 app.include_router(learning_menu.router, prefix=prefix)
 app.include_router(learning.router, prefix=prefix)
+app.include_router(learning_hub.router, prefix=prefix)
 app.include_router(user_preferences.router, prefix=prefix)
 app.include_router(user_transaction.router, prefix=prefix)
 app.include_router(user_discounts.router, prefix=prefix)
@@ -205,8 +217,12 @@ app.include_router(agent_advisor.router, prefix=prefix)
 app.include_router(user_chat_sql.router, prefix=prefix)
 
 # --- GAMIFICATION ROUTES ---
+app.include_router(gamification_badges.router, prefix=prefix)
 app.include_router(gamification_checkin.router, prefix=prefix)
+app.include_router(gamification_leaderboard.router, prefix=prefix)
 app.include_router(gamification_profile.router, prefix=prefix)
+app.include_router(gamification_missions.router, prefix=prefix)
+app.include_router(gamification_shop.router, prefix=prefix)
 app.include_router(gamification_streak.router, prefix=prefix)
 app.include_router(gamification_ws.router, prefix=f"{prefix}/gamification")
 
@@ -221,8 +237,12 @@ app.include_router(lecturer_refunds.router, prefix=prefix)
 app.include_router(lecturer_payout.router, prefix=prefix)
 app.include_router(lecturer_withdraw.router, prefix=prefix)
 app.include_router(lecturer_statistics.router, prefix=prefix)
+app.include_router(lecturer_contracts.router, prefix=prefix)
+app.include_router(lecturer_contracts.public_router, prefix=prefix)
 
 # --- ADMIN ROUTES ---
+app.include_router(admin_contracts.router, prefix=prefix)
+app.include_router(admin_courses.router, prefix=prefix)
 app.include_router(admin_user.router, prefix=prefix)
 app.include_router(admin_platform_settings.router, prefix=prefix)
 app.include_router(admin_lecturer.router, prefix=prefix)

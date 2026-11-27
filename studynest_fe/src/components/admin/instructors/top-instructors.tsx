@@ -1,4 +1,5 @@
 "use client";
+import { formatVndAsCoin } from "@/lib/learning-hub/coin-logic";
 
 import api from "@/lib/utils/fetcher/client/axios";
 import {
@@ -6,18 +7,14 @@ import {
   TopInstructorsSortBy,
 } from "@/types/admin/statistics";
 import { getImageUrl } from "@/lib/utils/helpers/image";
-import { HiUser } from "react-icons/hi";
+import { User } from "pulsoicon-react";
 import { useState } from "react";
 import useSWR from "swr";
 
 const formatValue = (value: number | null | undefined, metric: string) => {
   const safeValue = value ?? 0;
   if (metric === "revenue") {
-    return new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-      maximumFractionDigits: 0,
-    }).format(safeValue);
+    return formatVndAsCoin(safeValue);
   }
   return safeValue.toLocaleString("vi-VN");
 };
@@ -106,7 +103,7 @@ export default function TopInstructors() {
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center bg-green-100">
-                    <HiUser className="w-4 h-4 text-green-600" />
+                    <User animated={false} className="w-4 h-4 text-green-600" />
                   </div>
                 )}
               </div>

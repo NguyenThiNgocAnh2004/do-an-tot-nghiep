@@ -23,11 +23,11 @@ load_dotenv()
 # load config URL từ .env
 database_url = os.getenv("DATABASE_ASYNC_URL")
 if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 from app.db.models.database import Base
-from app.db.models import github_identity
-from app.db.models import catalog  # register additive metadata
+from app.db.models import github_identity, learning_hub, user_identity
+from app.db.models import billing, catalog, coins, shop  # register additive metadata
 from app.agent import github_connection  # account-linked credentials metadata
 from app.db.models import agent, code_attempts, learning_memory, quiz_attempts  # additive learner/agent state
 target_metadata = Base.metadata
@@ -79,11 +79,16 @@ async def run_async_migrations() -> None:
     and associate a connection with the context.
 
     """
+    connect_args = {}
+    if database_url and "psql-maymay.itup.io.vn" in database_url:
+        connect_args["host"] = "100.122.190.92"
+        connect_args["port"] = 5435
 
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
 
     async with connectable.connect() as connection:

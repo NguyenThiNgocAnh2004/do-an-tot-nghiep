@@ -3,17 +3,12 @@
 import api from "@/lib/utils/fetcher/client/axios";
 import { RevenueByCourseResponse } from "@/types/admin/statistics";
 import { getImageUrl } from "@/lib/utils/helpers/image";
-import { HiPhotograph } from "react-icons/hi";
+import { Image } from "pulsoicon-react";
 import useSWR from "swr";
 
-const formatCurrency = (value: number | null | undefined) => {
-  if (value === null || value === undefined || isNaN(value)) return "0 ₫";
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
-};
+import { formatVndAsCoin } from "@/lib/learning-hub/coin-logic";
+
+const formatCurrency = (value: number | null | undefined) => formatVndAsCoin(value);
 
 export default function RevenueByCourse() {
   const { data, isLoading } = useSWR<RevenueByCourseResponse>(
@@ -92,7 +87,7 @@ export default function RevenueByCourse() {
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">
-                    <HiPhotograph className="w-5 h-5 text-gray-400" />
+                    <Image animated={false} className="w-5 h-5 text-gray-400" />
                   </div>
                 )}
               </div>

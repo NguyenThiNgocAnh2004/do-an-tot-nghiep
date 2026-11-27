@@ -9,6 +9,8 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: Annotated[str, Field(min_length=6, max_length=72)]
     full_name: str | None = None
+    grade_level: int | None = Field(default=None, ge=1, le=12)
+    learning_track: str | None = Field(default=None, max_length=60)
 
 
 class UserOut(BaseModel):
@@ -34,6 +36,7 @@ class RefreshEmail(BaseModel):
 class VerifyEmail(BaseModel):
     email: EmailStr
     code: str
+    new_password: Annotated[str, Field(min_length=6, max_length=72)] | None = Field(default=None, repr=False)
 
 
 class RoleOut(BaseModel):
@@ -56,7 +59,7 @@ class BlockUser(BaseModel):
 
 
 class GoogleLogin(BaseModel):
-    credential: str
+    credential: str = Field(repr=False, description="ID token do Google cấp.")
     device_type: str | None = None
 
 
@@ -71,3 +74,13 @@ class VerifyOtp(BaseModel):
     otp_code: str
     purpose: str
     device_type: str | None = None
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: Annotated[str, Field(min_length=6, max_length=12)]
+    new_password: Annotated[str, Field(min_length=6, max_length=72)] = Field(repr=False)

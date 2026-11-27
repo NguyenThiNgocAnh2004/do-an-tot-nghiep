@@ -9,8 +9,7 @@ import {
   HelpCircle,
   Home,
   MapPin,
-  Sparkles,
-} from "lucide-react";
+} from "pulsoicon-react";
 import { Badge, Button } from "@/components/ui";
 
 /**
@@ -89,7 +88,6 @@ export default function NotFound() {
             variant="info"
             className="px-3.5 py-1 text-xs font-medium tracking-wide shadow-2xs"
           >
-            <Sparkles className="w-3.5 h-3.5 mr-1.5 text-primary animate-pulse" />
             Lỗi 404 • Không tìm thấy khoảng trời này
           </Badge>
         </div>
@@ -217,11 +215,7 @@ export default function NotFound() {
                 </text>
               </g>
 
-              {/* Các ngôi sao lấp lánh pastel xung quanh */}
-              <path
-                d="M36 58 L37.5 63 L42.5 64.5 L37.5 66 L36 71 L34.5 66 L29.5 64.5 L34.5 63 Z"
-                fill="#F7C9D9"
-              />
+              {/* Các chấm tròn trang trí */}
               <circle cx="44" cy="52" r="1.5" fill="#BFD7ED" />
               <circle cx="128" cy="96" r="2" fill="#BFD7ED" />
 
@@ -354,7 +348,7 @@ export default function NotFound() {
 
             {/* Card 2: Lộ trình */}
             <Link
-              href="/lo-trinh"
+              href="/learning-paths"
               className="group p-5 bg-surface rounded-[20px] border border-border hover:border-secondary-pastel hover:shadow-ambient-md transition-all duration-200 block"
             >
               <div className="flex items-start gap-3.5">

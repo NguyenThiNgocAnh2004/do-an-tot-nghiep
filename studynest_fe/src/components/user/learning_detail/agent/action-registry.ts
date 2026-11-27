@@ -21,9 +21,16 @@ export function applyEditorPatches(files: Record<string, string>, patches: unkno
   for (const raw of patches) {
     if (!plainObject(raw) || typeof raw.file_id !== 'string' || !Object.prototype.hasOwnProperty.call(files, raw.file_id) ||
       !Number.isInteger(raw.start) || !Number.isInteger(raw.end) || typeof raw.expected_text !== 'string' || typeof raw.replacement !== 'string') throw new Error('Vùng sửa không hợp lệ.');
-    const patch = raw as unknown as EditorPatch;
-    if (patch.start < 0 || patch.end < patch.start || patch.end > files[patch.file_id].length || patch.replacement.length > 100000 ||
-      files[patch.file_id].slice(patch.start, patch.end) !== patch.expected_text) throw new Error('Code đã thay đổi. Hãy tạo lại bản sửa.');
+    let patch = raw as unknown as EditorPatch;
+    const source = files[patch.file_id];
+    const inRange = patch.start >= 0 && patch.end >= patch.start && patch.end <= source.length;
+    if (!inRange || source.slice(patch.start, patch.end) !== patch.expected_text) {
+      // Model offsets are often off by a few characters; relocate by exact text when it is unambiguous.
+      const first = patch.expected_text ? source.indexOf(patch.expected_text) : -1;
+      if (first < 0 || source.indexOf(patch.expected_text, first + 1) !== -1) throw new Error('Code đã thay đổi. Hãy tạo lại bản sửa.');
+      patch = { ...patch, start: first, end: first + patch.expected_text.length };
+    }
+    if (patch.replacement.length > 100000) throw new Error('Code đã thay đổi. Hãy tạo lại bản sửa.');
     groups.set(patch.file_id, [...(groups.get(patch.file_id) || []), patch]);
   }
   const result = { ...files };
@@ -72,8 +79,18 @@ export class ActionRegistry {
       status, verified: status === 'completed', ...(result !== undefined ? { result } : {}), ...(error ? { error } : {}),
     });
     const current = this.snapshot();
-    if (current.page_instance_id !== request.page_instance_id || current.revision !== request.context_revision ||
-      current.lesson_id !== request.lesson_id || !Number.isFinite(Date.parse(request.expires_at)) || Date.parse(request.expires_at) <= Date.now()) return receipt('stale_context', undefined, 'Màn hình đã thay đổi hoặc lệnh hết hạn.');
+    const revisionDelta = current.revision - request.context_revision;
+    const currentLesson = current.lesson_id ?? null;
+    const requestedLesson = request.lesson_id ?? null;
+    if (
+      current.page_instance_id !== request.page_instance_id ||
+      revisionDelta < 0 ||
+      (revisionDelta > 0 && Boolean(request.approval_id)) ||
+      (requestedLesson !== null && currentLesson !== requestedLesson) ||
+      !Number.isFinite(Date.parse(request.expires_at)) ||
+      Date.parse(request.expires_at) <= Date.now()
+    )
+      return receipt('stale_context', undefined, 'Màn hình đã thay đổi hoặc lệnh hết hạn.');
     const definition = this.actions.get(request.name);
     if (!definition || !plainObject(request.arguments)) return receipt('failed', undefined, 'Thao tác không khả dụng trên màn hình này.');
     if (definition.mutation && !request.approval_id) return receipt('failed', undefined, 'Bản sửa cần được bạn xác nhận trước.');
@@ -83,7 +100,7 @@ export class ActionRegistry {
     signal?.addEventListener('abort', abort, { once: true });
     this.pending.set(request.action_id, controller);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const navigating = ['learning.navigate_lesson', 'learning.next_lesson', 'learning.previous_lesson', 'mcp.browser_click'].includes(request.name);
+    const navigating = ['learning.navigate_lesson', 'learning.next_lesson', 'learning.previous_lesson', 'mcp.browser_click', 'mcp.browser_navigate'].includes(request.name);
     if (navigating) this.navigationCount++;
     try {
       const timeout = new Promise<never>((_, reject) => {

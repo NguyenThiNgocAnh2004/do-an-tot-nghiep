@@ -2,7 +2,11 @@
 
 import { ActiveLessonResponse } from "@/types/user/activeLesson";
 import CodeLesson from "./code";
+import FillBlankLesson from "./fill-blank";
+import FlashcardLesson from "./flashcard";
+import ListeningLesson from "./listening";
 import QuizLesson from "./quiz";
+import SpeakingLesson from "./speaking";
 import VideoLesson from "./video";
 import MarkdownRenderer from "@/components/shared/markdown-renderer";
 import { Button } from "@/components/ui/button";
@@ -29,7 +33,6 @@ export default function LessonRenderer({
   hasNext,
   hasPrev,
   onSeekToTime,
-  accessToken,
   lessonAuthorId,
 }: LessonRendererProps) {
   const renderLesson = () => {
@@ -84,7 +87,6 @@ export default function LessonRenderer({
             hasPrev={hasPrev || false}
             onMarkCompleted={onMarkCompleted}
             completedLessons={completedLessons}
-            accessToken={accessToken}
             lessonAuthorId={lessonAuthorId}
             quizzes={
               activeLessonData.quizzes?.map((q) => {
@@ -112,8 +114,64 @@ export default function LessonRenderer({
             lesson={activeLessonData}
             onMarkCompleted={onMarkCompleted}
             completedLessons={completedLessons}
-            accessToken={accessToken}
             lessonAuthorId={lessonAuthorId}
+          />
+        );
+
+      case "flashcard":
+        return (
+          <FlashcardLesson
+            key={activeLessonData.id}
+            lesson={activeLessonData}
+            flashcards={activeLessonData.flashcards || []}
+            onMarkCompleted={onMarkCompleted}
+            completedLessons={completedLessons}
+          />
+        );
+
+      case "listening":
+        return (
+          <ListeningLesson
+            key={activeLessonData.id}
+            lesson={activeLessonData}
+            listening={activeLessonData.listening}
+            quizzes={activeLessonData.quizzes || []}
+            onMarkCompleted={onMarkCompleted}
+            completedLessons={completedLessons}
+            onNext={onNext}
+            onPrev={onPrev}
+            hasNext={hasNext}
+            hasPrev={hasPrev}
+          />
+        );
+
+      case "fill_blank":
+        return (
+          <FillBlankLesson
+            key={activeLessonData.id}
+            lesson={activeLessonData}
+            fillBlank={activeLessonData.fill_blank}
+            onMarkCompleted={onMarkCompleted}
+            completedLessons={completedLessons}
+            onNext={onNext}
+            onPrev={onPrev}
+            hasNext={hasNext}
+            hasPrev={hasPrev}
+          />
+        );
+
+      case "speaking":
+        return (
+          <SpeakingLesson
+            key={activeLessonData.id}
+            lesson={activeLessonData}
+            speaking={activeLessonData.speaking}
+            onMarkCompleted={onMarkCompleted}
+            completedLessons={completedLessons}
+            onNext={onNext}
+            onPrev={onPrev}
+            hasNext={hasNext}
+            hasPrev={hasPrev}
           />
         );
 

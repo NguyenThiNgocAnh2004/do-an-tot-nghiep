@@ -8,3 +8,6 @@ export * from "./image-preview-modal";
 export * from "./modal";
 export * from "./tabs";
 export * from "./overlays";
+export * from "./coin-badge";
+export * from "./coin-price";
+export * from "./pagination";

@@ -1,6 +1,7 @@
 "use client";
 
 import { uploadFile } from "@/lib/uploadFile";
+import { sanitizeEditableLearningHtml } from "@/components/shared/markdown-renderer/safe-html";
 import { getImageUrl } from "@/lib/utils/helpers/image";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import HorizontalRule from "@tiptap/extension-horizontal-rule";
@@ -38,30 +39,30 @@ import markdownItAttrs from "markdown-it-attrs";
 import markdownItTaskLists from "markdown-it-task-lists";
 import { useEffect, useRef, useState } from "react";
 import {
-  FaBold,
-  FaItalic,
-  FaListOl,
-  FaListUl,
-  FaQuoteLeft,
-  FaRedo,
-  FaStrikethrough,
-  FaTable,
-  FaTasks,
-  FaUndo,
-} from "react-icons/fa";
+  Bold,
+  Italic,
+  ListOrdered,
+  List,
+  Quote,
+  Redo2,
+  Strikethrough,
+  Table as FaTable,
+  ListTodo,
+  Undo2,
+} from "pulsoicon-react";
 import {
-  HiCode,
-  HiDocumentText,
-  HiLink,
-  HiMinus,
-  HiPhotograph,
-} from "react-icons/hi";
+  Code,
+  FileText,
+  Link as HiLink,
+  Minus,
+  Image as HiPhotograph,
+} from "pulsoicon-react";
 import {
-  MdFormatAlignCenter,
-  MdFormatAlignJustify,
-  MdFormatAlignLeft,
-  MdFormatAlignRight,
-} from "react-icons/md";
+  AlignCenter,
+  AlignJustify,
+  AlignLeft,
+  AlignRight,
+} from "pulsoicon-react";
 import TurndownService from "turndown";
 import "./editor.css";
 // ⚙️ Khởi tạo highlight.js
@@ -116,7 +117,7 @@ const parseMarkdownToHTML = (markdown: string): string => {
   if (!markdown || !markdown.trim()) return "";
 
   // Nếu đã là HTML, return luôn
-  if (markdown.trim().startsWith("<")) return markdown;
+  if (markdown.trim().startsWith("<")) return sanitizeEditableLearningHtml(markdown);
 
   // Xử lý nếu là JSON string được escape (từ AI API)
   // Ví dụ: "{\n  \"topic_description\": \"## Title\\nContent\"\n}"
@@ -127,7 +128,7 @@ const parseMarkdownToHTML = (markdown: string): string => {
   ) {
     try {
       const parsed = JSON.parse(processedMarkdown);
-      if (parsed && typeof parsed === "object" && parsed.topic_description) {
+      if (parsed && typeof parsed === "object" && typeof parsed.topic_description === "string") {
         processedMarkdown = parsed.topic_description;
       } else if (typeof parsed === "string") {
         processedMarkdown = parsed;
@@ -166,9 +167,9 @@ const parseMarkdownToHTML = (markdown: string): string => {
     // giữa câu hoặc bao quanh bởi khoảng trắng/ký tự đầu-cuối
     .replace(
       /(^|[\s([>])__(?!\*)([^_\n][^_]*?[^_\n])__(?=$|[\s\])<.,!?:;])/g,
-      (_, before, content) => {
+      (_, before: string, content: string) => {
         const ph = `${U_PLACE}_${idx++}`;
-        map.set(ph, `<u>${content}</u>`);
+        map.set(ph, `<u>${md.utils.escapeHtml(content)}</u>`);
         return `${before}${ph}`;
       }
     );
@@ -182,24 +183,7 @@ const parseMarkdownToHTML = (markdown: string): string => {
     html = html.split(ph).join(val);
   }
 
-  // 5) Thêm justify cho tất cả paragraph (khi AI đưa vào)
-  // Wrap HTML trong một div tạm để parse
-  const tempDiv =
-    typeof document !== "undefined" ? document.createElement("div") : null;
-  if (tempDiv) {
-    tempDiv.innerHTML = html;
-    // Tìm tất cả paragraph và thêm text-align: justify
-    const paragraphs = tempDiv.querySelectorAll("p");
-    paragraphs.forEach((p) => {
-      (p as HTMLElement).style.textAlign = "justify";
-    });
-    html = tempDiv.innerHTML;
-  } else {
-    // Fallback cho SSR: dùng regex để thêm style vào <p>
-    html = html.replace(/<p>/g, '<p style="text-align: justify;">');
-  }
-
-  return html;
+  return sanitizeEditableLearningHtml(html).replace(/<p>/g, '<p style="text-align: justify;">');
 };
 
 interface TiptapEditorProps {
@@ -348,6 +332,7 @@ export default function TiptapEditor({
       onChange(markdown);
     },
     editorProps: {
+      transformPastedHTML: sanitizeEditableLearningHtml,
       attributes: {
         class:
           "prose prose-sm sm:prose lg:prose-lg xl:prose-2xl mx-auto focus:outline-none",
@@ -518,29 +503,32 @@ export default function TiptapEditor({
         <div className="tiptap-toolbar flex flex-wrap items-center gap-1 border-b border-border bg-surface p-2 flex-shrink-0">
           {/* Undo/Redo */}
           <button
+            aria-label="Hoàn tác (Ctrl+Z)"
             type="button"
             onClick={() => editor.chain().focus().undo().run()}
             disabled={!editor.can().undo()}
             className="tiptap-toolbar-btn"
             title="Hoàn tác (Ctrl+Z)"
           >
-            <FaUndo />
+            <Undo2 size="1em" />
           </button>
 
           <button
+            aria-label="Làm lại (Ctrl+Y)"
             type="button"
             onClick={() => editor.chain().focus().redo().run()}
             disabled={!editor.can().redo()}
             className="tiptap-toolbar-btn"
             title="Làm lại (Ctrl+Y)"
           >
-            <FaRedo />
+            <Redo2 size="1em" />
           </button>
 
           <div className="w-px h-6 bg-border mx-2"></div>
 
           {/* Text Formatting */}
           <button
+            aria-label="In đậm (Ctrl+B)"
             type="button"
             onClick={() => editor.chain().focus().toggleBold().run()}
             className={`tiptap-toolbar-btn ${
@@ -548,10 +536,11 @@ export default function TiptapEditor({
             }`}
             title="In đậm (Ctrl+B)"
           >
-            <FaBold />
+            <Bold size="1em" />
           </button>
 
           <button
+            aria-label="In nghiêng (Ctrl+I)"
             type="button"
             onClick={() => editor.chain().focus().toggleItalic().run()}
             className={`tiptap-toolbar-btn ${
@@ -559,10 +548,11 @@ export default function TiptapEditor({
             }`}
             title="In nghiêng (Ctrl+I)"
           >
-            <FaItalic />
+            <Italic size="1em" />
           </button>
 
           <button
+            aria-label="Gạch ngang"
             type="button"
             onClick={() => editor.chain().focus().toggleStrike().run()}
             className={`tiptap-toolbar-btn ${
@@ -570,7 +560,7 @@ export default function TiptapEditor({
             }`}
             title="Gạch ngang"
           >
-            <FaStrikethrough />
+            <Strikethrough size="1em" />
           </button>
 
           <div className="w-px h-6 bg-border mx-2"></div>
@@ -615,6 +605,7 @@ export default function TiptapEditor({
 
           {/* Text Align */}
           <button
+            aria-label="Căn trái"
             type="button"
             onClick={() => editor.chain().focus().setTextAlign("left").run()}
             className={`tiptap-toolbar-btn ${
@@ -622,10 +613,11 @@ export default function TiptapEditor({
             }`}
             title="Căn trái"
           >
-            <MdFormatAlignLeft />
+            <AlignLeft size="1em" />
           </button>
 
           <button
+            aria-label="Căn giữa"
             type="button"
             onClick={() => editor.chain().focus().setTextAlign("center").run()}
             className={`tiptap-toolbar-btn ${
@@ -633,10 +625,11 @@ export default function TiptapEditor({
             }`}
             title="Căn giữa"
           >
-            <MdFormatAlignCenter />
+            <AlignCenter size="1em" />
           </button>
 
           <button
+            aria-label="Căn phải"
             type="button"
             onClick={() => editor.chain().focus().setTextAlign("right").run()}
             className={`tiptap-toolbar-btn ${
@@ -644,10 +637,11 @@ export default function TiptapEditor({
             }`}
             title="Căn phải"
           >
-            <MdFormatAlignRight />
+            <AlignRight size="1em" />
           </button>
 
           <button
+            aria-label="Căn đều"
             type="button"
             onClick={() => editor.chain().focus().setTextAlign("justify").run()}
             className={`tiptap-toolbar-btn ${
@@ -655,13 +649,14 @@ export default function TiptapEditor({
             }`}
             title="Căn đều"
           >
-            <MdFormatAlignJustify />
+            <AlignJustify size="1em" />
           </button>
 
           <div className="w-px h-6 bg-border mx-2"></div>
 
           {/* Lists */}
           <button
+            aria-label="Danh sách không thứ tự"
             type="button"
             onClick={() => editor.chain().focus().toggleBulletList().run()}
             className={`tiptap-toolbar-btn ${
@@ -669,10 +664,11 @@ export default function TiptapEditor({
             }`}
             title="Danh sách không thứ tự"
           >
-            <FaListUl />
+            <List size="1em" />
           </button>
 
           <button
+            aria-label="Danh sách có thứ tự"
             type="button"
             onClick={() => editor.chain().focus().toggleOrderedList().run()}
             className={`tiptap-toolbar-btn ${
@@ -680,10 +676,11 @@ export default function TiptapEditor({
             }`}
             title="Danh sách có thứ tự"
           >
-            <FaListOl />
+            <ListOrdered size="1em" />
           </button>
 
           <button
+            aria-label="Danh sách công việc"
             type="button"
             onClick={() => editor.chain().focus().toggleTaskList().run()}
             className={`tiptap-toolbar-btn ${
@@ -691,10 +688,11 @@ export default function TiptapEditor({
             }`}
             title="Danh sách công việc"
           >
-            <FaTasks />
+            <ListTodo size="1em" />
           </button>
 
           <button
+            aria-label="Trích dẫn"
             type="button"
             onClick={() => editor.chain().focus().toggleBlockquote().run()}
             className={`tiptap-toolbar-btn ${
@@ -702,22 +700,24 @@ export default function TiptapEditor({
             }`}
             title="Trích dẫn"
           >
-            <FaQuoteLeft />
+            <Quote size="1em" />
           </button>
 
           <button
+            aria-label="Đường kẻ ngang"
             type="button"
             onClick={() => editor.chain().focus().setHorizontalRule().run()}
             className="tiptap-toolbar-btn"
             title="Đường kẻ ngang"
           >
-            <HiMinus />
+            <Minus size="1em" />
           </button>
 
           <div className="w-px h-6 bg-border mx-2"></div>
 
           {/* Markdown Mode Toggle */}
           <button
+            aria-label={ isMarkdownMode ? "Chuyển sang chế độ WYSIWYG" : "Chuyển sang chế độ Markdown" }
             type="button"
             onClick={handleToggleMarkdownMode}
             className={`tiptap-toolbar-btn ${isMarkdownMode ? "active" : ""}`}
@@ -727,7 +727,7 @@ export default function TiptapEditor({
                 : "Chuyển sang chế độ Markdown"
             }
           >
-            <HiDocumentText />
+            <FileText size="1em" />
           </button>
 
           <div className="w-px h-6 bg-border mx-2"></div>
@@ -735,6 +735,7 @@ export default function TiptapEditor({
           {/* Code block + language menu */}
           <div className="relative" ref={langMenuRef}>
             <button
+              aria-label="Code block"
               type="button"
               onClick={() =>
                 editor
@@ -748,7 +749,7 @@ export default function TiptapEditor({
               }`}
               title="Code block"
             >
-              <HiCode />
+              <Code size="1em" />
             </button>
 
             {editor.isActive("codeBlock") &&
@@ -798,12 +799,13 @@ export default function TiptapEditor({
 
           {/* Table */}
           <button
+            aria-label="Chèn bảng"
             type="button"
             onClick={insertTable}
             className="tiptap-toolbar-btn"
             title="Chèn bảng"
           >
-            <FaTable />
+            <FaTable size="1em" />
           </button>
 
           <div className="w-px h-6 bg-border mx-2"></div>
@@ -811,6 +813,7 @@ export default function TiptapEditor({
           {/* Link */}
           {editor.isActive("link") ? (
             <button
+              aria-label="Xóa liên kết"
               type="button"
               onClick={() => {
                 editor.chain().focus().unsetLink().run();
@@ -818,10 +821,11 @@ export default function TiptapEditor({
               className="tiptap-toolbar-btn active"
               title="Xóa liên kết"
             >
-              <HiLink />
+              <HiLink size="1em" />
             </button>
           ) : (
             <button
+              aria-label="Chèn liên kết"
               type="button"
               onClick={() => {
                 const url = prompt("Nhập URL:");
@@ -836,7 +840,7 @@ export default function TiptapEditor({
               className="tiptap-toolbar-btn"
               title="Chèn liên kết"
             >
-              <HiLink />
+              <HiLink size="1em" />
             </button>
           )}
 
@@ -858,13 +862,14 @@ export default function TiptapEditor({
             }}
           />
           <button
+            aria-label="Chèn ảnh"
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="tiptap-toolbar-btn"
             title="Chèn ảnh"
             disabled={isUploading}
           >
-            <HiPhotograph />
+            <HiPhotograph size="1em" />
           </button>
         </div>
       )}

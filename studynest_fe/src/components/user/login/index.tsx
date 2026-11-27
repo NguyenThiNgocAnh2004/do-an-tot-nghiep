@@ -1,10 +1,16 @@
 "use client";
 
-import AuthScenicLayout from "@/components/user/auth/auth-scenic-layout";
-import GitHubSignInButton from "@/components/shared/github-sign-in-button";
-import GoogleSignInButton from "@/components/shared/google-sign-in-button";
-import { Alert, Button, Card, Divider, Input, Modal } from "@/components/ui";
-import api from "@/lib/utils/fetcher/client/axios";
+import AuthShell, {
+  AuthInput,
+  AuthProviders,
+  PasswordToggle,
+  authLinkClass,
+  authSubmitClass,
+  type AuthRequestError,
+} from "@/components/user/auth/AuthShell";
+import { Alert, Button, Modal } from "@/components/ui";
+import { postAuthSession } from "@/lib/auth/login";
+import { isDpopMode } from "@/lib/auth/mode";
 import {
   calculateRemainingMs,
   formatBanDate,
@@ -14,8 +20,9 @@ import {
 } from "@/types/shared/auth";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { HiEye, HiEyeOff } from "react-icons/hi";
+import { useActionState, useCallback, useEffect, useState } from "react";
+import { ArrowRight, LockKeyhole, Mail } from "pulsoicon-react";
+import { sanitizeRedirect } from "@/lib/auth/safe-redirect";
 
 // ============================================
 // VALIDATION FUNCTIONS
@@ -98,9 +105,10 @@ const ErrorDialog = ({
       onClose={onClose}
       title={title}
       size="md"
+      className="rounded-[2rem] [&_button]:min-h-11 [&_button]:min-w-11"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} className="flex-1">
+          <Button variant="secondary" onClick={onClose} className="flex-1 rounded-full">
             Đóng
           </Button>
           {actions?.map((action, index) => (
@@ -108,7 +116,7 @@ const ErrorDialog = ({
               key={index}
               variant={variant === "error" ? "destructive" : "primary"}
               onClick={action.onClick}
-              className="flex-1"
+              className="flex-1 rounded-full"
             >
               {action.label}
             </Button>
@@ -128,12 +136,16 @@ const ErrorDialog = ({
 const Login = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get("redirect") || "/";
+  const redirectUrl = sanitizeRedirect(searchParams.get("redirect"));
+  const finishLogin = () => {
+    router.push(redirectUrl);
+    router.refresh();
+  };
+  const goToVerification = (target: string) => router.push(target);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<{
     email?: string;
     password?: string;
@@ -165,20 +177,20 @@ const Login = () => {
   // ============================================
 
   const handleGoogleCredentialResponse = useCallback(
-    async (response: any) => {
+    async (response: { credential: string }) => {
       if (!response.credential) return;
       setIsGoogleLoading(true);
       setErrors((prev) => ({ ...prev, general: "" }));
       try {
-        await api.post("/auth/google", { credential: response.credential });
-        router.push(redirectUrl);
-        router.refresh();
-      } catch (error: any) {
-        handleLoginError(error);
+        await postAuthSession("/auth/google", { credential: response.credential });
+        finishLogin();
+      } catch (error) {
+        handleLoginError(error, "google");
       } finally {
         setIsGoogleLoading(false);
       }
     },
+    // finishLogin/handleLoginError only close over router and redirectUrl.
     [router, redirectUrl]
   );
 
@@ -242,7 +254,8 @@ const Login = () => {
   // ERROR HANDLING
   // ============================================
 
-  const handleLoginError = (error: any) => {
+  const handleLoginError = (cause: unknown, method: "password" | "google" = "password") => {
+    const error = cause as (AuthRequestError & { response?: { data?: { code?: string } } }) | undefined;
     const detail = error?.response?.data?.detail;
 
     if (isLoginErrorDetail(detail)) {
@@ -250,26 +263,45 @@ const Login = () => {
       return;
     }
 
-    if (error?.status === 401 || error?.response?.status === 401) {
+    if (isDpopMode && method === "password" && error?.response?.data?.code === "invalid_token") {
+      setErrors((prev) => ({
+        ...prev,
+        general: "Thông tin tài khoản hoặc mật khẩu không chính xác.",
+      }));
+      return;
+    }
+
+    if (!isDpopMode && (error?.status === 401 || error?.response?.status === 401)) {
       const redirectParam =
         redirectUrl !== "/"
           ? `&redirect=${encodeURIComponent(redirectUrl)}`
           : "";
-      router.push(
+      goToVerification(
         "/email_authentication?email=" +
           encodeURIComponent(email) +
           redirectParam
       );
-    } else if (error?.status === 404 || error?.response?.status === 404) {
+      return;
+    }
+
+    if (
+      error?.status === 401 ||
+      error?.response?.status === 401 ||
+      error?.status === 404 ||
+      error?.response?.status === 404
+    ) {
       setErrors((prev) => ({
         ...prev,
-        general: "Tài khoản hoặc mật khẩu không đúng. Vui lòng kiểm tra lại.",
+        general:
+          typeof detail === "string" && detail.trim()
+            ? detail
+            : "Thông tin tài khoản hoặc mật khẩu không chính xác.",
       }));
     } else {
       setErrors((prev) => ({
         ...prev,
         general:
-          typeof detail === "string"
+          typeof detail === "string" && detail.trim()
             ? detail
             : "Đã có lỗi xảy ra. Vui lòng thử lại sau.",
       }));
@@ -278,27 +310,45 @@ const Login = () => {
 
   const handleErrorByCode = (detail: LoginErrorDetail) => {
     switch (detail.error_code) {
-      case "INVALID_CREDENTIALS":
+      case "ACCOUNT_NOT_FOUND":
         setErrors((prev) => ({
           ...prev,
-          general: detail.message || "Email hoặc mật khẩu không đúng",
+          email:
+            detail.message ||
+            "Thông tin tài khoản không chính xác (Email chưa được đăng ký).",
+          general:
+            detail.message ||
+            "Thông tin tài khoản không chính xác (Email chưa được đăng ký trên hệ thống).",
         }));
         break;
 
-      case "EMAIL_NOT_VERIFIED":
-        if (detail.email) {
-          localStorage.setItem("pending_verify_email", detail.email);
+      case "INVALID_CREDENTIALS":
+        setErrors((prev) => ({
+          ...prev,
+          general:
+            detail.message ||
+            "Thông tin tài khoản hoặc mật khẩu không chính xác.",
+        }));
+        break;
+
+      case "EMAIL_NOT_VERIFIED": {
+        const targetVerifyEmail = detail.email || email.trim();
+        if (targetVerifyEmail) {
+          localStorage.setItem("pending_verify_email", targetVerifyEmail);
         }
         const redirectParam =
           redirectUrl !== "/"
             ? `&redirect=${encodeURIComponent(redirectUrl)}`
             : "";
-        router.push(
+        const sentParam = detail.otp_sent ? "&sent=1" : "";
+        goToVerification(
           "/email_authentication?email=" +
-            encodeURIComponent(detail.email || email) +
+            encodeURIComponent(targetVerifyEmail) +
+            sentParam +
             redirectParam
         );
         break;
+      }
 
       case "ACCOUNT_DELETED":
         setDialogState({
@@ -319,7 +369,7 @@ const Login = () => {
                   <span className="font-medium">📋 Lý do:</span> {detail.reason}
                 </p>
               )}
-              <p className="text-muted-foreground text-xs mt-2">
+              <p className="text-foreground/85 text-xs mt-2">
                 Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ bộ phận hỗ
                 trợ.
               </p>
@@ -354,7 +404,7 @@ const Login = () => {
                   <Countdown bannedUntil={detail.banned_until} />
                 </p>
               )}
-              <p className="text-muted-foreground text-xs mt-2">
+              <p className="text-foreground/85 text-xs mt-2">
                 Vui lòng đợi đến khi tài khoản được mở khóa hoặc liên hệ support
                 nếu cần hỗ trợ.
               </p>
@@ -382,7 +432,7 @@ const Login = () => {
                   <span className="font-medium">📋 Lý do:</span> {detail.reason}
                 </p>
               )}
-              <p className="text-muted-foreground text-xs mt-2">
+              <p className="text-foreground/85 text-xs mt-2">
                 Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ bộ phận hỗ
                 trợ.
               </p>
@@ -409,23 +459,21 @@ const Login = () => {
   // SUBMIT HANDLER
   // ============================================
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // React 19 form action: the transition gives `isLoading` and keeps the dialog open on errors.
+  // Login stays client-side on purpose: the DPoP key lives in the browser, not on the server.
+  const [, submitAction, isLoading] = useActionState(async () => {
     setTouched({ email: true, password: true });
     setErrors((prev) => ({ ...prev, general: "" }));
-    if (!validateForm()) return;
+    if (!validateForm()) return null;
 
-    setIsLoading(true);
     try {
-      await api.post("/auth/login", { email, password });
-      router.push(redirectUrl);
-      router.refresh();
-    } catch (error: any) {
+      await postAuthSession("/auth/login", { email, password });
+      finishLogin();
+    } catch (error) {
       handleLoginError(error);
-    } finally {
-      setIsLoading(false);
     }
-  };
+    return null;
+  }, null);
 
   const closeDialog = () => {
     setDialogState((prev) => ({ ...prev, isOpen: false }));
@@ -437,121 +485,91 @@ const Login = () => {
 
   return (
     <>
-      <AuthScenicLayout>
-          <Card className="rounded-[24px] p-6 sm:p-8 space-y-5">
-            {/* Header */}
-            <div className="text-center space-y-2">
-              <h1 className="font-display text-2xl sm:text-3xl font-bold text-foreground">
-                Đăng nhập
-              </h1>
-              <p className="text-muted-foreground text-sm">
-                Chào mừng trở lại! Vui lòng đăng nhập vào tài khoản của bạn
-              </p>
-            </div>
+      <AuthShell
+        screen="login"
+        title="Đăng nhập"
+        description="Đăng nhập để tiếp tục học cùng Mây Mây."
+      >
+        <AuthProviders
+          onCredential={handleGoogleCredentialResponse}
+          busy={isGoogleLoading}
+          githubRedirect={redirectUrl}
+          githubError={searchParams.get("github_error")}
+        />
 
-            {/* Google Login */}
-            <GoogleSignInButton
-              onCredential={handleGoogleCredentialResponse}
-              busy={isGoogleLoading}
-            />
+        {errors.general && (
+          <Alert variant="destructive" className="mt-3">{errors.general}</Alert>
+        )}
 
-            <GitHubSignInButton redirectTo={redirectUrl} callbackError={searchParams.get("github_error")} />
+        <form className="mt-3 space-y-3" action={submitAction}>
+          <AuthInput
+            id="email"
+            name="email"
+            type="email"
+            label="Email"
+            autoComplete="email"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            inputMode="email"
+            enterKeyHint="next"
+            required
+            value={email}
+            onChange={(e) => handleEmailChange(e.target.value)}
+            onBlur={() => handleBlur("email")}
+            error={touched.email ? errors.email : undefined}
+            placeholder="you@example.com"
+            leftIcon={<Mail aria-hidden="true" className="size-4" />}
+          />
 
-            {/* Divider */}
-            <Divider label="HOẶC" />
-
-            {/* Error Message */}
-            {errors.general && (
-              <Alert variant="destructive">{errors.general}</Alert>
-            )}
-
-            {/* Login Form */}
-            <form className="space-y-5" onSubmit={handleSubmit}>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                label="Email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => handleEmailChange(e.target.value)}
-                onBlur={() => handleBlur("email")}
-                error={touched.email ? errors.email : undefined}
-                placeholder="you@example.com"
-              />
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label
-                    htmlFor="password"
-                    className="block text-sm font-medium text-foreground"
-                  >
-                    Mật khẩu
-                  </label>
-                  <Link
-                    href="/forgot-password"
-                    className="text-xs text-primary hover:text-primary-hover font-medium"
-                  >
-                    Quên mật khẩu?
-                  </Link>
-                </div>
-                <Input
-                  id="password"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(e) => handlePasswordChange(e.target.value)}
-                  onBlur={() => handleBlur("password")}
-                  error={touched.password ? errors.password : undefined}
-                  rightIcon={
-                    <button
-                      type="button"
-                      className="text-subtle-foreground hover:text-foreground transition-colors cursor-pointer"
-                      onClick={() => setShowPassword(!showPassword)}
-                      tabIndex={-1}
-                      aria-label={
-                        showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"
-                      }
-                    >
-                      {showPassword ? (
-                        <HiEyeOff className="h-5 w-5" />
-                      ) : (
-                        <HiEye className="h-5 w-5" />
-                      )}
-                    </button>
-                  }
-                  placeholder="••••••••"
-                />
-              </div>
-
-              <Button
-                type="submit"
-                variant="primary"
-                size="lg"
-                fullWidth
-                disabled={isGoogleLoading || !email || !password}
-                isLoading={isLoading}
-                loadingText="Đang đăng nhập..."
-              >
-                Đăng nhập
-              </Button>
-            </form>
-
-            {/* Footer Link */}
-            <div className="text-center text-sm text-muted-foreground">
-              Chưa có tài khoản?{" "}
-              <Link
-                href="/register"
-                className="text-primary hover:text-primary-hover font-semibold"
-              >
-                Đăng ký ngay
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-x-2">
+              <label htmlFor="password" className="text-sm font-medium text-foreground">
+                Mật khẩu
+              </label>
+              <Link href="/forgot-password" className={`${authLinkClass} text-xs`}>
+                Quên mật khẩu?
               </Link>
             </div>
-          </Card>
-      </AuthScenicLayout>
+            <AuthInput
+              id="password"
+              name="password"
+              type={showPassword ? "text" : "password"}
+              autoComplete="current-password"
+              enterKeyHint="go"
+              required
+              value={password}
+              onChange={(e) => handlePasswordChange(e.target.value)}
+              onBlur={() => handleBlur("password")}
+              error={touched.password ? errors.password : undefined}
+              leftIcon={<LockKeyhole aria-hidden="true" className="size-4" />}
+              rightIcon={
+                <PasswordToggle visible={showPassword} onClick={() => setShowPassword(!showPassword)} />
+              }
+              placeholder="••••••••"
+            />
+          </div>
+
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            fullWidth
+            disabled={isGoogleLoading || !email || !password}
+            isLoading={isLoading}
+            loadingText="Đang đăng nhập..."
+            className={`mt-2 ${authSubmitClass}`}
+            rightIcon={<ArrowRight aria-hidden="true" className="size-4" />}
+          >
+            Đăng nhập
+          </Button>
+        </form>
+
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-x-1.5 border-t border-border pt-1 text-sm text-foreground/85">
+          <span>Chưa có tài khoản?</span>
+          <Link href="/register" className={authLinkClass}>Đăng ký ngay</Link>
+        </div>
+      </AuthShell>
 
       {/* Error Dialog */}
       <ErrorDialog

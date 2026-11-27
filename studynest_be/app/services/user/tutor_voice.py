@@ -1,9 +1,10 @@
-"""Authenticated Grok Voice relay. Audio is transient; transcripts reuse tutor chat."""
+"""Authenticated Qwen 3.8 Omni Flash Realtime voice relay. Audio is transient; transcripts reuse tutor chat."""
 import asyncio
 import base64
 import json
 import hashlib
 import math
+import secrets
 import time
 import uuid
 from contextlib import suppress
@@ -13,13 +14,15 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
+from redis.exceptions import RedisError
 from sqlalchemy import desc, select
 
-from app.core.deps import AuthorizationService
+from app.core.auth_encryption import open_auth_payload, seal_auth_payload
+from app.core.deps import AccessCredentials, AccessIdentity, AuthorizationService
 from app.core.embedding import EmbeddingService
+from app.core.qwen_voice import VoiceName, normalize_voice, open_realtime, realtime_api_key, send_event
 from app.core.redis import get_redis
 from app.core.settings import settings
-from app.core.xai_voice import VoiceName, normalize_voice, open_realtime, send_event
 from app.db.models.database import TutorChatMessages, TutorChatThreads
 from app.db.sesson import AsyncSessionLocal
 from app.services.user.tutor_chat import TutorChatService
@@ -29,10 +32,16 @@ from app.services.user.tutor_chat_message import TutorChatMessageService
 def origin_allowed(origin):
     if not origin:  # Native clients authenticate with Authorization, not browser cookies.
         return True
-    origins = {x.strip().rstrip('/') for x in settings.TUTOR_VOICE_ORIGINS.split(',') if x.strip()}
+    origins = {
+        x.strip().rstrip('/')
+        for raw in (settings.TUTOR_VOICE_ORIGINS, settings.CORS_ALLOWED_ORIGINS)
+        for x in (raw or '').split(',')
+        if x.strip()
+    }
     if settings.FRONTEND_URL:
         p = urlsplit(settings.FRONTEND_URL)
-        origins.add(f'{p.scheme}://{p.netloc}')
+        if p.scheme and p.netloc:
+            origins.add(f'{p.scheme}://{p.netloc}')
     return origin.rstrip('/') in origins
 
 
@@ -287,7 +296,7 @@ Lịch sử gần đây: {json.dumps(context, ensure_ascii=False)}'''
 
                     kind = event['type']
                     if kind == 'error':
-                        raise ConnectionError('xAI rejected a realtime event')
+                        raise ConnectionError('Qwen Realtime rejected a realtime event')
                     if kind == 'input_audio_buffer.speech_started':
                         await self.emit('interrupted')
                         if response_id or finishing or self.model_text:
@@ -303,16 +312,24 @@ Lịch sử gần đây: {json.dumps(context, ensure_ascii=False)}'''
                     elif kind == 'input_audio_buffer.committed':
                         input_item_id = event.get('item_id') or input_item_id
                     elif kind in {
+                        'conversation.item.input_audio_transcription.text',
                         'conversation.item.input_audio_transcription.updated',
                         'conversation.item.input_audio_transcription.completed',
                     }:
-                        if not input_item_id or event.get('item_id') != input_item_id or transcript_ready.is_set():
+                        item_id = event.get('item_id')
+                        if not input_item_id and item_id:
+                            input_item_id = item_id
+                        if (input_item_id and item_id and item_id != input_item_id) or transcript_ready.is_set():
                             continue
-                        final = kind.endswith('.completed') and event.get('status') != 'in_progress'
-                        text = event.get('transcript') or ''
+                        if kind.endswith('.text'):
+                            text = f"{event.get('text') or ''}{event.get('stash') or ''}".strip()
+                            final = False
+                        else:
+                            final = kind.endswith('.completed') and event.get('status') != 'in_progress'
+                            text = (event.get('transcript') or '').strip()
                         if len(text) > 20000:
                             raise ValueError('Transcript too long')
-                        if text != self.user_text or final:
+                        if text and (text != self.user_text or final):
                             self.user_text = text
                             await self.emit('transcript', role='user', text=text, delta=text if final else '')
                         if final:
@@ -324,12 +341,12 @@ Lịch sử gần đây: {json.dumps(context, ensure_ascii=False)}'''
                         response_id = None
                         status = event['response'].get('status')
                         if status == 'failed':
-                            raise ConnectionError('xAI voice response failed')
+                            raise ConnectionError('Qwen voice response failed')
                         if status == 'cancelled':
                             await self.save_turn(interrupted=True)
                         else:
                             finishing = asyncio.create_task(finish_turn(calls, transcript_ready))
-                    elif response_id and event.get('response_id') == response_id:
+                    elif response_id and event.get('response_id', response_id) == response_id:
                         if kind in {'response.output_audio_transcript.delta', 'response.audio_transcript.delta'}:
                             delta = event['delta']
                             self.model_text += delta
@@ -356,6 +373,37 @@ Lịch sử gần đây: {json.dumps(context, ensure_ascii=False)}'''
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
+async def issue_tutor_voice_ticket_async(auth: AuthorizationService) -> str:
+    identity, scheme = await auth.get_legacy_access_binding_async()
+    ticket = secrets.token_urlsafe(32)
+    key = 'voice:ticket:v2:' + hashlib.sha256(ticket.encode()).hexdigest()
+    binding = {
+        'sid': str(identity.sid), 'user_id': str(identity.user_id),
+        'exp': identity.expires_at, 'scheme': scheme,
+    }
+    try:
+        if await get_redis().set(key, seal_auth_payload(binding, key), ex=60, nx=True):
+            return ticket
+    except RedisError:
+        pass
+    raise HTTPException(503, 'Chưa thể cấp vé voice.')
+
+
+async def _redeem_voice_ticket_async(ticket: str) -> AccessIdentity:
+    if not (settings.AUTH_ALLOW_COOKIE_COMPAT or settings.AUTH_ALLOW_UNBOUND_BEARER):
+        raise ValueError
+    if not (30 <= len(ticket) <= 100 and ticket.isascii()):
+        raise ValueError
+    key = 'voice:ticket:v2:' + hashlib.sha256(ticket.encode()).hexdigest()
+    payload = open_auth_payload(await get_redis().getdel(key), key)
+    if (not payload or type(payload.get('exp')) is not int or not {
+        'cookie': settings.AUTH_ALLOW_COOKIE_COMPAT,
+        'bearer': settings.AUTH_ALLOW_UNBOUND_BEARER,
+    }.get(payload.get('scheme'))):
+        raise ValueError
+    return AccessIdentity(uuid.UUID(payload['user_id']), uuid.UUID(payload['sid']), payload['exp'], None)
+
+
 async def run_tutor_voice(websocket: WebSocket, lesson_id: uuid.UUID | None = None):
     if any(key in getattr(websocket, 'query_params', {}) for key in ('token', 'access_token', 'refresh_token')):
         await websocket.close(code=1008)
@@ -366,27 +414,25 @@ async def run_tutor_voice(websocket: WebSocket, lesson_id: uuid.UUID | None = No
     protocols = websocket.scope.get('subprotocols', [])
     bearer = next((p[7:] for p in protocols if p.startswith('bearer.')), None)
     ticket = next((p[7:] for p in protocols if p.startswith('ticket.')), None)
-    if ticket:
-        redeemed = await get_redis().getdel('voice:ticket:' + hashlib.sha256(ticket.encode()).hexdigest())
-        if not redeemed:
-            await websocket.close(code=1008)
-            return
-        bearer = redeemed.decode() if isinstance(redeemed, bytes) else redeemed
-    if bearer:
-        websocket.scope['headers'][:] = [(k, v) for k, v in websocket.scope['headers'] if k != b'authorization'] + [(b'authorization', f'Bearer {bearer}'.encode())]
     await websocket.accept(subprotocol='studynest-voice' if 'studynest-voice' in protocols else None)
-    user = await AuthorizationService.get_require_role_ws(websocket, ['USER', 'LECTURER', 'ADMIN'])
+    legacy = AccessCredentials('bearer', bearer) if bearer is not None else None
+    binding = None
+    if ticket is not None:
+        try:
+            binding = await _redeem_voice_ticket_async(ticket)
+        except (RedisError, ValueError, KeyError, TypeError):
+            await websocket.close(code=4401)
+            return
+    user = await AuthorizationService.get_require_role_ws(
+        websocket, ['USER', 'LECTURER', 'ADMIN'], legacy=legacy, legacy_binding=binding,
+    )
     if not user:
-        return
-    if user.is_banned or user.deleted_at:
-        await websocket.send_json({'type': 'error', 'message': 'Tài khoản hiện không được sử dụng voice.'})
-        await websocket.close(code=1008)
         return
     relay = TutorVoiceSession(websocket, user, lesson_id)
     lease_key, lease_id = f'tutor:voice:{user.id}', uuid.uuid4().hex
     locked = False
     try:
-        if not settings.TUTOR_VOICE_ENABLED or not settings.XAI_API_KEY:
+        if not settings.TUTOR_VOICE_ENABLED or not realtime_api_key():
             raise HTTPException(503, 'Voice chưa được bật trên hệ thống.')
         prompt, supported = await relay.prepare()
         voice_name = normalize_voice(getattr(websocket, 'query_params', {}).get('voice', settings.TUTOR_VOICE_NAME))

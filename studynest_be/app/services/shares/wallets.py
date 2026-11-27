@@ -21,6 +21,9 @@ from app.libs.formats.datetime import now as get_now
 from app.libs.formats.datetime import to_utc_naive
 from app.schemas.shares.notification import NotificationCreateSchema
 from app.schemas.shares.wallets import PaymentCreateSchema
+from app.services.coin_math import topup_to_coin
+from app.services.coin_service import TOPUP_SOURCE, CoinService
+from app.services.coupon_settlement import billing_policy
 from app.services.shares.currency_service import convert_vnd_to_usd
 from app.services.shares.notification import NotificationService
 from app.services.shares.paypal_service import PayPalService
@@ -105,14 +108,17 @@ class WalletsService:
             usd_str = f"{usd_value:.2f}"
             # 2️⃣ Tạo order redirect PayPal
             if request:
+                forwarded_host = request.headers.get("x-forwarded-host")
                 proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-                host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+                host = forwarded_host or request.headers.get("host") or request.url.netloc
                 base_url = f"{proto}://{host}"
+                api_prefix = "/api" if forwarded_host else "/api/v1"
             else:
                 base_url = settings.BACKEND_URL
+                api_prefix = "/api/v1"
 
-            return_url = f"{base_url}/api/v1/wallets/callback"
-            cancel_url = f"{base_url}/api/v1/wallets/cancel"
+            return_url = f"{base_url}{api_prefix}/wallets/callback"
+            cancel_url = f"{base_url}{api_prefix}/wallets/cancel"
 
             result = await paypal.create_order_redirect(
                 value=usd_str,
@@ -266,9 +272,8 @@ class WalletsService:
         amount = transaction.amount or Decimal(0)
         now = await to_utc_naive(get_now())
 
-        # Cập nhật ví user
-        wallet.balance = (wallet.balance or 0) + amount
-        wallet.total_in = (wallet.total_in or 0) + amount
+        # Cập nhật ví user: học viên nhận Coin thật, giảng viên giữ VND
+        coin_credited = await self.credit_topup_async(wallet, transaction_id=transaction.id, amount=amount)
         wallet.last_transaction_at = now
         wallet.updated_at = now
 
@@ -314,7 +319,10 @@ class WalletsService:
                 user_id=transaction.user_id,
                 roles=["USER", "LECTURER"],
                 title="Nạp tiền thành công 💰",
-                content=f"Bạn đã nạp {amount:,} VND vào ví thành công.",
+                content=(
+                    f"Bạn đã nạp {amount:,} VND và nhận {coin_credited:,} Coin."
+                    if coin_credited else f"Bạn đã nạp {amount:,} VND vào ví thành công."
+                ),
                 url="/wallets/transactions",
                 type="wallet",
                 role_target=["USER", "LECTURER"],
@@ -494,6 +502,22 @@ class WalletsService:
             raise HTTPException(
                 status_code=500, detail=f"Lỗi khi tạo lại thanh toán: {e}"
             )
+
+    async def credit_topup_async(
+        self, wallet: Wallets, *, transaction_id: uuid.UUID, amount: Decimal,
+    ) -> int:
+        """Ghi nhận tiền nạp: mọi người dùng nhận Coin thật theo tỷ giá (phần dư dưới 1 Coin ở lại ví VND).
+        Ví VND của giảng viên chỉ chứa thu nhập để rút. Trả về số Coin đã cộng."""
+        policy = await billing_policy(self.db)
+        coin, remainder = topup_to_coin(amount, policy.coin_vnd_rate)
+        coins = CoinService(self.db)
+        if coin > 0:
+            if await coins._already_recorded(wallet.user_id, TOPUP_SOURCE, transaction_id, "paid"):
+                return coin
+            await coins.credit_paid_async(wallet.user_id, coin, source=TOPUP_SOURCE, ref_id=transaction_id)
+        wallet.balance = (wallet.balance or 0) + remainder
+        wallet.total_in = (wallet.total_in or 0) + remainder
+        return coin
 
     async def ensure_wallet_balance(self, user_id: uuid.UUID, required_amount: Decimal):
         """

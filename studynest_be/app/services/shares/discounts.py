@@ -1,10 +1,13 @@
 import uuid
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import Depends, HTTPException
 from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth_encryption import open_auth_payload
 from app.db.models.database import (
     Categories,
     Courses,
@@ -12,12 +15,21 @@ from app.db.models.database import (
     Discounts,
     DiscountTargets,
     PurchaseItems,
+    RewardInstances,
+    Rewards,
     User,
+    UserRewardInventory,
 )
 from app.db.sesson import get_session
 from app.libs.formats.datetime import now as get_now
 from app.libs.formats.datetime import to_utc_naive
 from app.schemas.shares.discounts import DiscountCreateSchema, DiscountTargetItem
+
+
+from app.services.coupon_settlement import billing_policy, instructor_max_percent, settle
+from app.services.gamification.coupon_rewards import (
+    REWARD_CODE_PREFIX, REWARD_DIGEST_PREFIX, find_discount, reward_inventory_entry,
+)
 
 
 class DiscountService:
@@ -71,6 +83,13 @@ class DiscountService:
                 raise HTTPException(
                     400, f"Mã giảm giá '{schema.discount_code}' đã tồn tại."
                 )
+
+            if schema.discount_code.upper().startswith(REWARD_CODE_PREFIX) or schema.discount_code.lower().startswith(REWARD_DIGEST_PREFIX):
+                raise HTTPException(400, "Tiền tố này dành riêng cho mã thưởng.")
+            if created_role == "LECTURER" and schema.discount_type == "percent":
+                policy = await billing_policy(self.db)
+                if schema.percent_value > instructor_max_percent(policy):
+                    raise HTTPException(422, "Mức giảm vượt giới hạn dành cho giảng viên.")
 
             is_admin = created_role == "ADMIN"
 
@@ -236,6 +255,8 @@ class DiscountService:
         validity: Optional[str] = None,
         sort_by: str = "created_at",
         order_dir: str = "desc",
+        created_role: Optional[str] = None,
+        creator_id: Optional[uuid.UUID] = None,
     ):
         now = get_now()
 
@@ -267,8 +288,16 @@ class DiscountService:
             )
 
         elif role == "ADMIN":
-            # Admin xem toàn bộ discount do Admin tạo (course+category+global)
-            stmt = select(Discounts).where(Discounts.created_role == "ADMIN")
+            # Admin kiểm soát toàn bộ mã của Nền tảng và tất cả Giảng viên
+            stmt = select(Discounts).outerjoin(
+                User, User.id == Discounts.created_by
+            ).where(
+                ~Discounts.discount_code.startswith(REWARD_DIGEST_PREFIX)
+            )
+            if created_role in ("ADMIN", "LECTURER"):
+                stmt = stmt.where(Discounts.created_role == created_role)
+            if creator_id is not None:
+                stmt = stmt.where(Discounts.created_by == creator_id)
 
         else:
             raise HTTPException(403, "Role không hợp lệ.")
@@ -278,12 +307,22 @@ class DiscountService:
         # ============================
         if search:
             like = f"%{search.lower()}%"
-            stmt = stmt.where(
-                or_(
-                    func.lower(Discounts.name).like(like),
-                    func.lower(Discounts.discount_code).like(like),
+            if role == "ADMIN":
+                stmt = stmt.where(
+                    or_(
+                        func.lower(Discounts.name).like(like),
+                        func.lower(Discounts.discount_code).like(like),
+                        func.lower(func.coalesce(User.fullname, "")).like(like),
+                        func.lower(func.coalesce(User.email, "")).like(like),
+                    )
                 )
-            )
+            else:
+                stmt = stmt.where(
+                    or_(
+                        func.lower(Discounts.name).like(like),
+                        func.lower(Discounts.discount_code).like(like),
+                    )
+                )
 
         # ============================
         # FILTER applies_to (nếu ADMIN muốn lọc select)
@@ -329,13 +368,87 @@ class DiscountService:
         offset = (page - 1) * limit
         stmt = stmt.order_by(sort_order).limit(limit).offset(offset)
 
-        items = (await self.db.execute(stmt)).scalars().all()
+        raw_items = (await self.db.execute(stmt)).scalars().all()
+
+        if role != "ADMIN":
+            return {
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "items": raw_items,
+            }
+
+        # Làm giàu thông tin người tạo & số mục tiêu áp dụng cho Admin
+        creator_ids = list({d.created_by for d in raw_items if d.created_by})
+        creator_map: dict[uuid.UUID, dict] = {}
+        if creator_ids:
+            creator_rows = (
+                await self.db.execute(
+                    select(User.id, User.fullname, User.email, User.avatar).where(
+                        User.id.in_(creator_ids)
+                    )
+                )
+            ).all()
+            for uid, fullname, email, avatar in creator_rows:
+                creator_map[uid] = {
+                    "id": str(uid),
+                    "fullname": fullname or "Chưa đặt tên",
+                    "email": email,
+                    "avatar": avatar,
+                }
+
+        discount_ids = [d.id for d in raw_items]
+        target_count_map: dict[uuid.UUID, int] = {}
+        if discount_ids:
+            tgt_rows = (
+                await self.db.execute(
+                    select(
+                        DiscountTargets.discount_id,
+                        func.count(DiscountTargets.id),
+                    )
+                    .where(DiscountTargets.discount_id.in_(discount_ids))
+                    .group_by(DiscountTargets.discount_id)
+                )
+            ).all()
+            for did, cnt in tgt_rows:
+                target_count_map[did] = int(cnt or 0)
+
+        enriched_items = []
+        for d in raw_items:
+            enriched_items.append(
+                {
+                    "id": str(d.id),
+                    "name": d.name,
+                    "discount_code": d.discount_code,
+                    "discount_type": d.discount_type,
+                    "percent_value": d.percent_value,
+                    "fixed_value": float(d.fixed_value)
+                    if d.fixed_value is not None
+                    else None,
+                    "applies_to": d.applies_to,
+                    "usage_count": int(d.usage_count or 0),
+                    "usage_limit": d.usage_limit,
+                    "per_user_limit": d.per_user_limit,
+                    "start_at": d.start_at,
+                    "end_at": d.end_at,
+                    "is_hidden": bool(d.is_hidden),
+                    "is_active": bool(d.is_active),
+                    "description": d.description,
+                    "created_at": d.created_at,
+                    "created_by": str(d.created_by) if d.created_by else None,
+                    "created_role": d.created_role,
+                    "creator": creator_map.get(d.created_by)
+                    if d.created_by
+                    else None,
+                    "target_count": target_count_map.get(d.id, 0),
+                }
+            )
 
         return {
             "total": total,
             "page": page,
             "limit": limit,
-            "items": items,
+            "items": enriched_items,
         }
 
     # ============================================================
@@ -438,6 +551,23 @@ class DiscountService:
         # ============================
         # 5) FORMAT DISCOUNT TRẢ VỀ
         # ============================
+        creator_info = None
+        if discount.created_by:
+            creator_row = (
+                await self.db.execute(
+                    select(User.id, User.fullname, User.email, User.avatar).where(
+                        User.id == discount.created_by
+                    )
+                )
+            ).first()
+            if creator_row:
+                creator_info = {
+                    "id": str(creator_row[0]),
+                    "fullname": creator_row[1] or "Chưa đặt tên",
+                    "email": creator_row[2],
+                    "avatar": creator_row[3],
+                }
+
         discount_data = {
             "id": str(discount.id),
             "code": discount.discount_code,
@@ -454,6 +584,9 @@ class DiscountService:
             "end_at": discount.end_at,
             "is_active": discount.is_active,
             "is_hidden": discount.is_hidden,
+            "created_by": str(discount.created_by) if discount.created_by else None,
+            "created_role": discount.created_role,
+            "creator": creator_info,
         }
 
         return {
@@ -593,6 +726,9 @@ class DiscountService:
         user_id: uuid.UUID,
         course_ids: List[uuid.UUID],
         discount_input: str,
+        *,
+        policy=None,
+        checkout: bool = False,
     ):
         # 0. Lấy danh sách khóa học trước (dù mã có hợp lệ hay không)
         courses = (
@@ -678,27 +814,7 @@ class DiscountService:
                 "total_price_after": total_price_after,
             }
 
-        # 1. Tìm discount theo id hoặc theo code
-        discount_obj = None
-
-        # detect UUID
-        try:
-            parsed = uuid.UUID(discount_input)
-            discount_obj = await self.db.scalar(
-                select(Discounts).where(Discounts.id == parsed)
-            )
-        except Exception:
-            pass
-
-        # detect code
-        if not discount_obj:
-            discount_obj = await self.db.scalar(
-                select(Discounts).where(
-                    func.lower(Discounts.discount_code) == discount_input.lower()
-                )
-            )
-
-        # Không tìm thấy mã → trả nhưng vẫn đúng format
+        discount_obj = await find_discount(self.db, discount_input, lock=checkout)
         if not discount_obj:
             return build_no_discount_response("Mã giảm giá không tồn tại")
 
@@ -713,14 +829,18 @@ class DiscountService:
                 "Mã giảm giá chưa đến thời gian sử dụng", discount
             )
 
-        if discount.end_at and discount.end_at < now:
+        if discount.end_at and discount.end_at <= now:
             return build_no_discount_response("Mã giảm giá đã hết hạn", discount)
 
         if not discount.is_active:
             return build_no_discount_response("Mã giảm giá không hợp lệ", discount)
 
-        if discount.usage_limit and discount.usage_count >= discount.usage_limit:
+        if discount.usage_limit and (discount.usage_count or 0) >= discount.usage_limit:
             return build_no_discount_response("Mã giảm giá đã hết lượt dùng", discount)
+
+        reward_code = (discount.discount_code or "").startswith(REWARD_DIGEST_PREFIX)
+        if reward_code and not await reward_inventory_entry(self.db, discount.id, user_id):
+            return build_no_discount_response("Mã thưởng không còn hiệu lực hoặc không thuộc về bạn")
 
         # per-user-limit theo GIAO DỊCH, không theo số khóa
         used_transactions = (
@@ -753,59 +873,46 @@ class DiscountService:
         target_course_ids = {t.course_id for t in target_rows if t.course_id}
         target_category_ids = {t.category_id for t in target_rows if t.category_id}
 
+        policy = policy if policy is not None else await billing_policy(self.db)
+        sponsor = "platform" if discount.created_role == "ADMIN" else "instructor"
         results = []
-        total_discount = 0.0
-        total_price_after = 0.0
-
+        total_discount = Decimal(0)
+        total_price_after = Decimal(0)
+        eligible = [
+            c for c in courses if (
+                (sponsor == "platform" or c.instructor_id == discount.created_by)
+                and (not target_course_ids and not target_category_ids
+                     or c.id in target_course_ids or c.category_id in target_category_ids)
+            )
+        ]
+        eligible_ids = {c.id for c in eligible}
         for c in courses:
-            price = float(c.base_price or 0)
-
-            can_apply = (
-                (not target_course_ids and not target_category_ids)
-                # nếu không có target cụ thể → hiểu là áp cho tất cả (tuỳ rule business)
-                or c.id in target_course_ids
-                or c.category_id in target_category_ids
-            )
-
-            # Không áp dụng cho khóa này
-            if not can_apply:
-                results.append(
-                    {
-                        "course_id": c.id,
-                        "course_title": c.title,
-                        "base_price": price,
-                        "discounted_amount": 0.0,
-                        "final_price": price,
-                        "applied": False,
-                        "reason": "Mã không áp dụng cho khóa học này",
-                    }
+            price = Decimal(c.base_price or 0)
+            applied = c.id in eligible_ids
+            reason = None if applied else "Mã không áp dụng cho khóa học này"
+            fixed = discount.discount_type == "fixed"
+            requested = (
+                Decimal(discount.fixed_value or 0) if fixed
+                else price * Decimal(discount.percent_value or 0) / 100
+            ) if applied else Decimal(0)
+            try:
+                amounts = settle(
+                    price, policy.platform_fee, sponsor if applied else None, requested,
+                    fixed=fixed, instructor_max=Decimal(policy.discount_max_percent),
                 )
-                total_price_after += price
-                continue
-
-            # 4. Tính giảm
-            if discount.discount_type == "percent":
-                percent_value = float(discount.percent_value or 0)
-                discount_amount = price * (percent_value / 100.0)
-            else:
-                discount_amount = float(discount.fixed_value or 0)
-
-            discount_amount = min(discount_amount, price)
-            final_price = price - discount_amount
-
-            results.append(
-                {
-                    "course_id": c.id,
-                    "course_title": c.title,
-                    "base_price": price,
-                    "discounted_amount": discount_amount,
-                    "final_price": final_price,
-                    "applied": True,
-                }
-            )
-
-            total_discount += discount_amount
-            total_price_after += final_price
+            except HTTPException as error:
+                if checkout:
+                    raise
+                applied, reason = False, error.detail
+                amounts = settle(price, policy.platform_fee)
+            results.append({
+                "course_id": c.id, "course_title": c.title, "base_price": float(amounts.base),
+                "discounted_amount": float(amounts.discount), "final_price": float(amounts.paid),
+                "applied": applied and amounts.discount > 0, "reason": reason,
+                **({"settlement": amounts, "sponsor": sponsor if amounts.discount else None} if checkout else {}),
+            })
+            total_discount += amounts.discount
+            total_price_after += amounts.paid
 
         # thông tin per-user
         per_user_limit = discount.per_user_limit
@@ -817,7 +924,7 @@ class DiscountService:
 
         return {
             "discount_id": discount_id,
-            "discount_code": discount.discount_code,
+            "discount_code": discount_input if reward_code else discount.discount_code,
             "discount_name": discount.name,
             "discount_description": discount.description,
             "discount_applies_to": discount.applies_to,
@@ -834,8 +941,8 @@ class DiscountService:
             "user_used_transactions": used_transactions,
             "user_remaining_uses": remaining_uses,
             "items": results,
-            "total_discount": total_discount,
-            "total_price_after": total_price_after,
+            "total_discount": float(total_discount),
+            "total_price_after": float(total_price_after),
         }
 
     async def toggle_discount_active_async(
@@ -856,6 +963,8 @@ class DiscountService:
         )
         if not discount:
             raise HTTPException(404, "Không tìm thấy mã giảm giá.")
+        if (discount.discount_code or "").startswith(REWARD_DIGEST_PREFIX):
+            raise HTTPException(403, "Mã thưởng do hệ thống quản lý.")
 
         # Quyền
         if role == "LECTURER" and discount.created_by != user.id:
@@ -899,6 +1008,8 @@ class DiscountService:
         )
         if not discount:
             raise HTTPException(404, "Không tìm thấy mã giảm giá.")
+        if (discount.discount_code or "").startswith(REWARD_DIGEST_PREFIX):
+            raise HTTPException(403, "Mã thưởng do hệ thống quản lý.")
 
         # Quyền
         if role == "LECTURER" and discount.created_by != user.id:
@@ -1396,4 +1507,571 @@ class DiscountService:
             "limit": limit,
             "total": total,
             "items": items,
+        }
+
+    async def get_my_voucher_vault_async(self, user_id: uuid.UUID):
+        """Tổng hợp Kho mã giảm giá của học viên: mã thưởng cá nhân + mã ưu đãi công khai + thống kê."""
+        now_local = get_now()
+        now_utc = datetime.now(UTC)
+        soon_delta = timedelta(hours=72)
+
+        def _as_utc(dt: datetime | None) -> datetime | None:
+            if dt is None:
+                return None
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+        # 1) Mã thưởng cá nhân từ UserRewardInventory + RewardInstances
+        expiry_col = func.coalesce(UserRewardInventory.expires_at, RewardInstances.expires_at)
+        personal_rows = (
+            await self.db.execute(
+                select(
+                    RewardInstances.id,
+                    Rewards.title,
+                    RewardInstances.code_masked,
+                    RewardInstances.max_percent,
+                    expiry_col.label("expires_at"),
+                    UserRewardInventory.status.label("inv_status"),
+                    RewardInstances.status.label("inst_status"),
+                    UserRewardInventory.used_at,
+                    UserRewardInventory.created_at,
+                )
+                .select_from(UserRewardInventory)
+                .join(RewardInstances, RewardInstances.id == UserRewardInventory.reward_instance_id)
+                .join(Rewards, Rewards.id == RewardInstances.reward_id)
+                .where(
+                    UserRewardInventory.user_id == user_id,
+                    UserRewardInventory.reward_type == "coupon",
+                    RewardInstances.max_percent.is_not(None),
+                )
+                .order_by(desc(UserRewardInventory.created_at), RewardInstances.id)
+            )
+        ).all()
+
+        vault_items: list[dict] = []
+        for row in personal_rows:
+            exp_utc = _as_utc(row.expires_at)
+            statuses = {row.inv_status, row.inst_status}
+            if "revoked" in statuses:
+                status = "revoked"
+            elif row.used_at is not None or "used" in statuses:
+                status = "used"
+            elif "expired" in statuses or (exp_utc is not None and exp_utc <= now_utc):
+                status = "expired"
+            else:
+                status = "available"
+
+            expiring_soon = (
+                status == "available"
+                and exp_utc is not None
+                and (exp_utc - now_utc) <= soon_delta
+            )
+            vault_items.append(
+                {
+                    "id": str(row.id),
+                    "source": "personal",
+                    "title": row.title or "Mã thưởng Mây Mây",
+                    "description": "Mã thưởng riêng dành cho tài khoản của bạn, áp dụng giảm giá khóa học.",
+                    "code": None,
+                    "code_masked": row.code_masked or "MMR-••••",
+                    "can_reveal": status == "available",
+                    "discount_type": "percent",
+                    "percent_value": float(row.max_percent or 0),
+                    "fixed_value": None,
+                    "applies_to": "global",
+                    "target_names": [],
+                    "target_count": 0,
+                    "primary_course_slug": None,
+                    "status": status,
+                    "expiring_soon": expiring_soon,
+                    "expires_at": exp_utc.isoformat() if exp_utc else None,
+                    "used_at": _as_utc(row.used_at).isoformat() if row.used_at else None,
+                    "remaining_uses": 1 if status == "available" else 0,
+                    "per_user_limit": 1,
+                }
+            )
+
+        # 2) Mã ưu đãi công khai từ Discounts (is_active, ~is_hidden)
+        public_discounts = (
+            (
+                await self.db.execute(
+                    select(Discounts)
+                    .where(
+                        Discounts.is_active.is_(True),
+                        or_(Discounts.is_hidden.is_(False), Discounts.is_hidden.is_(None)),
+                    )
+                    .order_by(desc(Discounts.created_at))
+                    .limit(60)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        discount_ids = [d.id for d in public_discounts]
+        usage_by_discount: dict[uuid.UUID, int] = {}
+        target_courses_map: dict[uuid.UUID, list[tuple[str, str]]] = {}
+        target_cats_map: dict[uuid.UUID, list[str]] = {}
+
+        if discount_ids:
+            used_rows = (
+                await self.db.execute(
+                    select(
+                        PurchaseItems.discount_id,
+                        func.count(func.distinct(PurchaseItems.transaction_id)),
+                    )
+                    .where(
+                        PurchaseItems.user_id == user_id,
+                        PurchaseItems.discount_id.in_(discount_ids),
+                    )
+                    .group_by(PurchaseItems.discount_id)
+                )
+            ).all()
+            usage_by_discount = {did: int(cnt or 0) for did, cnt in used_rows if did}
+
+            course_target_rows = (
+                await self.db.execute(
+                    select(DiscountTargets.discount_id, Courses.title, Courses.slug)
+                    .join(Courses, Courses.id == DiscountTargets.course_id)
+                    .where(DiscountTargets.discount_id.in_(discount_ids))
+                )
+            ).all()
+            for did, title, slug in course_target_rows:
+                target_courses_map.setdefault(did, []).append((title, slug))
+
+            cat_target_rows = (
+                await self.db.execute(
+                    select(DiscountTargets.discount_id, Categories.name)
+                    .join(Categories, Categories.id == DiscountTargets.category_id)
+                    .where(DiscountTargets.discount_id.in_(discount_ids))
+                )
+            ).all()
+            for did, name in cat_target_rows:
+                target_cats_map.setdefault(did, []).append(name)
+
+        for d in public_discounts:
+            if not d.discount_code or d.discount_code.startswith(REWARD_DIGEST_PREFIX):
+                continue
+            if d.start_at and d.start_at > now_local:
+                continue
+
+            used_cnt = usage_by_discount.get(d.id, 0)
+            limit_reached = bool(d.usage_limit and (d.usage_count or 0) >= d.usage_limit)
+            user_limit_reached = bool(d.per_user_limit and used_cnt >= d.per_user_limit)
+            is_expired = bool(d.end_at and d.end_at < now_local)
+
+            if user_limit_reached:
+                status = "used"
+            elif is_expired or limit_reached:
+                status = "expired"
+            else:
+                status = "available"
+
+            remaining_uses: int | None = None
+            if d.per_user_limit:
+                remaining_uses = max(0, d.per_user_limit - used_cnt)
+            elif d.usage_limit:
+                remaining_uses = max(0, d.usage_limit - (d.usage_count or 0))
+
+            expiring_soon = (
+                status == "available"
+                and d.end_at is not None
+                and (d.end_at - now_local) <= soon_delta
+            )
+
+            course_targets = target_courses_map.get(d.id, [])
+            cat_targets = target_cats_map.get(d.id, [])
+            all_names = [t[0] for t in course_targets] + cat_targets
+            primary_slug = course_targets[0][1] if len(course_targets) == 1 else None
+
+            vault_items.append(
+                {
+                    "id": str(d.id),
+                    "source": "public",
+                    "title": d.name,
+                    "description": d.description or "",
+                    "code": d.discount_code,
+                    "code_masked": d.discount_code,
+                    "can_reveal": False,
+                    "discount_type": d.discount_type,
+                    "percent_value": float(d.percent_value) if d.percent_value is not None else None,
+                    "fixed_value": float(d.fixed_value) if d.fixed_value is not None else None,
+                    "applies_to": d.applies_to,
+                    "target_names": all_names[:3],
+                    "target_count": len(all_names),
+                    "primary_course_slug": primary_slug,
+                    "status": status,
+                    "expiring_soon": expiring_soon,
+                    "expires_at": d.end_at.isoformat() if d.end_at else None,
+                    "used_at": None,
+                    "remaining_uses": remaining_uses,
+                    "per_user_limit": d.per_user_limit,
+                }
+            )
+
+        # 2b) Mã ưu đãi Combo từ bảng bundle_coupons
+        from app.db.models.learning_paths import (
+            BundleCoupon,
+            BundleOrder,
+            BundleVersion,
+            CourseBundle,
+        )
+
+        latest_bundle_ver = (
+            select(
+                BundleVersion.bundle_id,
+                func.max(BundleVersion.version).label("max_ver"),
+            )
+            .where(BundleVersion.status == "published")
+            .group_by(BundleVersion.bundle_id)
+            .subquery()
+        )
+        combo_coupon_rows = (
+            await self.db.execute(
+                select(
+                    BundleCoupon,
+                    CourseBundle.slug.label("bundle_slug"),
+                    BundleVersion.title.label("bundle_title"),
+                )
+                .join(CourseBundle, CourseBundle.id == BundleCoupon.bundle_id)
+                .join(latest_bundle_ver, latest_bundle_ver.c.bundle_id == CourseBundle.id)
+                .join(
+                    BundleVersion,
+                    (BundleVersion.bundle_id == latest_bundle_ver.c.bundle_id)
+                    & (BundleVersion.version == latest_bundle_ver.c.max_ver),
+                )
+                .where(
+                    BundleCoupon.is_active.is_(True),
+                    CourseBundle.is_active.is_(True),
+                    CourseBundle.deleted_at.is_(None),
+                    BundleCoupon.starts_at <= now_utc,
+                )
+                .order_by(desc(BundleCoupon.value), BundleCoupon.ends_at.asc())
+            )
+        ).all()
+
+        combo_coupon_ids = [r[0].id for r in combo_coupon_rows]
+        combo_total_used_map: dict[uuid.UUID, int] = {}
+        combo_user_used_map: dict[uuid.UUID, int] = {}
+        if combo_coupon_ids:
+            tot_rows = (
+                await self.db.execute(
+                    select(BundleOrder.coupon_id, func.count(BundleOrder.id))
+                    .where(BundleOrder.coupon_id.in_(combo_coupon_ids))
+                    .group_by(BundleOrder.coupon_id)
+                )
+            ).all()
+            combo_total_used_map = {cid: int(cnt) for cid, cnt in tot_rows if cid}
+            usr_rows = (
+                await self.db.execute(
+                    select(BundleOrder.coupon_id, func.count(BundleOrder.id))
+                    .where(
+                        BundleOrder.coupon_id.in_(combo_coupon_ids),
+                        BundleOrder.user_id == user_id,
+                    )
+                    .group_by(BundleOrder.coupon_id)
+                )
+            ).all()
+            combo_user_used_map = {cid: int(cnt) for cid, cnt in usr_rows if cid}
+
+        for cp, b_slug, b_title in combo_coupon_rows:
+            exp_utc = _as_utc(cp.ends_at)
+            used_by_me = combo_user_used_map.get(cp.id, 0)
+            used_total = combo_total_used_map.get(cp.id, 0)
+            limit_reached = bool(cp.max_uses and used_total >= cp.max_uses)
+            user_limit_reached = bool(cp.per_user_limit and used_by_me >= cp.per_user_limit)
+            is_expired = bool(exp_utc and exp_utc <= now_utc)
+
+            if user_limit_reached:
+                c_status = "used"
+            elif is_expired or limit_reached:
+                c_status = "expired"
+            else:
+                c_status = "available"
+
+            c_remaining: int | None = None
+            if cp.per_user_limit:
+                c_remaining = max(0, cp.per_user_limit - used_by_me)
+            elif cp.max_uses:
+                c_remaining = max(0, cp.max_uses - used_total)
+
+            c_expiring_soon = (
+                c_status == "available"
+                and exp_utc is not None
+                and (exp_utc - now_utc) <= soon_delta
+            )
+            clean_b_title = (b_title or "Combo học tập").replace("[QA] ", "").strip()
+            is_pct = cp.discount_type == "percent"
+            vault_items.append(
+                {
+                    "id": f"combo-{cp.id}",
+                    "source": "combo",
+                    "title": f"Ưu đãi Combo · {clean_b_title}",
+                    "description": f"Áp dụng riêng khi thanh toán gói combo {clean_b_title}.",
+                    "code": cp.code,
+                    "code_masked": cp.code,
+                    "can_reveal": False,
+                    "discount_type": cp.discount_type,
+                    "percent_value": float(cp.value) if is_pct else None,
+                    "fixed_value": float(cp.value) if not is_pct else None,
+                    "applies_to": "combo",
+                    "target_names": [clean_b_title],
+                    "target_count": 1,
+                    "primary_course_slug": None,
+                    "primary_bundle_slug": b_slug,
+                    "status": c_status,
+                    "expiring_soon": c_expiring_soon,
+                    "expires_at": exp_utc.isoformat() if exp_utc else None,
+                    "used_at": None,
+                    "remaining_uses": c_remaining,
+                    "per_user_limit": cp.per_user_limit,
+                }
+            )
+
+        # 3) Thống kê tổng tiết kiệm từ DiscountHistory + BundleOrder
+        saved_vnd = await self.db.scalar(
+            select(func.coalesce(func.sum(DiscountHistory.discounted_amount), 0)).where(
+                DiscountHistory.user_id == user_id
+            )
+        )
+        bundle_saved_vnd = await self.db.scalar(
+            select(func.coalesce(func.sum(BundleOrder.discount_amount), 0)).where(
+                BundleOrder.user_id == user_id
+            )
+        )
+        history_count = await self.db.scalar(
+            select(func.count(DiscountHistory.id)).where(DiscountHistory.user_id == user_id)
+        )
+        bundle_coupon_used_count = await self.db.scalar(
+            select(func.count(BundleOrder.id)).where(
+                BundleOrder.user_id == user_id,
+                BundleOrder.coupon_id.is_not(None),
+            )
+        )
+
+        available_items = [i for i in vault_items if i["status"] == "available"]
+        summary = {
+            "total_available": len(available_items),
+            "personal_available": sum(1 for i in available_items if i["source"] == "personal"),
+            "public_available": sum(1 for i in available_items if i["source"] == "public"),
+            "combo_available": sum(1 for i in available_items if i["source"] == "combo"),
+            "expiring_soon": sum(1 for i in available_items if i["expiring_soon"]),
+            "total_used": int(history_count or 0) + int(bundle_coupon_used_count or 0),
+            "total_saved_vnd": float(saved_vnd or 0) + float(bundle_saved_vnd or 0),
+        }
+
+        # Sắp xếp: khả dụng -> sắp hết hạn -> mã riêng trước -> phần trăm giảm cao trước
+        status_order = {"available": 0, "used": 1, "expired": 2, "revoked": 3}
+        vault_items.sort(
+            key=lambda x: (
+                status_order.get(x["status"], 9),
+                0 if x["expiring_soon"] else 1,
+                0 if x["source"] == "personal" else 1,
+                -(x["percent_value"] or 0),
+            )
+        )
+
+        return {"summary": summary, "items": vault_items}
+
+    async def reveal_personal_coupon_async(
+        self, user_id: uuid.UUID, instance_id: uuid.UUID
+    ) -> dict:
+        """Giải mã mã thưởng cá nhân cho đúng chủ sở hữu."""
+        row = (
+            await self.db.execute(
+                select(RewardInstances, UserRewardInventory)
+                .join(
+                    UserRewardInventory,
+                    UserRewardInventory.reward_instance_id == RewardInstances.id,
+                )
+                .where(
+                    RewardInstances.id == instance_id,
+                    UserRewardInventory.user_id == user_id,
+                    UserRewardInventory.reward_type == "coupon",
+                )
+            )
+        ).first()
+
+        if not row:
+            raise HTTPException(404, "Không tìm thấy mã thưởng trong kho của bạn.")
+
+        instance, inventory = row
+        now_utc = datetime.now(UTC)
+        exp = inventory.expires_at or instance.expires_at
+        if exp is not None and exp.tzinfo is None:
+            exp = exp.replace(tzinfo=UTC)
+
+        if (
+            instance.status != "available"
+            or inventory.status != "active"
+            or inventory.used_at is not None
+            or (exp is not None and exp <= now_utc)
+        ):
+            raise HTTPException(400, "Mã thưởng đã được sử dụng hoặc đã hết hạn.")
+
+        payload = open_auth_payload(
+            instance.code_encrypted, f"reward-coupon:{user_id}:{instance.id}"
+        )
+        code = payload.get("code") if isinstance(payload, dict) else None
+        if not code:
+            raise HTTPException(500, "Không thể giải mã mã thưởng lúc này.")
+
+        return {
+            "id": str(instance.id),
+            "code": code,
+            "code_masked": instance.code_masked,
+            "expires_at": exp.isoformat() if exp else None,
+        }
+
+    async def bulk_toggle_discounts_active_async(
+        self,
+        discount_ids: list[uuid.UUID],
+        is_active: bool,
+    ):
+        """Admin bật/tắt hàng loạt mã giảm giá (bao gồm mã nền tảng & mã giảng viên)."""
+        if not discount_ids:
+            return {"updated": 0, "is_active": bool(is_active)}
+
+        rows = (
+            await self.db.execute(
+                select(Discounts).where(
+                    Discounts.id.in_(discount_ids),
+                    ~Discounts.discount_code.startswith(REWARD_DIGEST_PREFIX),
+                )
+            )
+        ).scalars().all()
+
+        updated = 0
+        for d in rows:
+            d.is_active = bool(is_active)
+            updated += 1
+
+        await self.db.commit()
+        return {"updated": updated, "is_active": bool(is_active)}
+
+    async def get_admin_discount_stats_async(self):
+        """Tổng hợp KPI chiến dịch khuyến mãi (Nền tảng + Giảng viên) cho Admin Voucher Studio."""
+        all_discounts = (
+            await self.db.execute(
+                select(Discounts).where(
+                    ~Discounts.discount_code.startswith(REWARD_DIGEST_PREFIX)
+                )
+            )
+        ).scalars().all()
+        now = get_now()
+        now_naive = now.replace(tzinfo=None) if now.tzinfo else now
+        running = 0
+        upcoming = 0
+        expired = 0
+        inactive = 0
+        admin_count = 0
+        lecturer_count = 0
+        lecturer_running = 0
+        lecturer_inactive = 0
+        total_redemptions = 0
+        creator_agg: dict[uuid.UUID, dict] = {}
+
+        for d in all_discounts:
+            total_redemptions += int(d.usage_count or 0)
+            is_lecturer_code = d.created_role == "LECTURER"
+            if is_lecturer_code:
+                lecturer_count += 1
+            else:
+                admin_count += 1
+
+            is_running = False
+            if not d.is_active:
+                inactive += 1
+                if is_lecturer_code:
+                    lecturer_inactive += 1
+            else:
+                start_at = (
+                    d.start_at.replace(tzinfo=None)
+                    if d.start_at and d.start_at.tzinfo
+                    else d.start_at
+                )
+                end_at = (
+                    d.end_at.replace(tzinfo=None)
+                    if d.end_at and d.end_at.tzinfo
+                    else d.end_at
+                )
+                if start_at and now_naive < start_at:
+                    upcoming += 1
+                elif end_at and now_naive > end_at:
+                    expired += 1
+                else:
+                    running += 1
+                    is_running = True
+                    if is_lecturer_code:
+                        lecturer_running += 1
+
+            if is_lecturer_code and d.created_by:
+                bucket = creator_agg.setdefault(
+                    d.created_by,
+                    {"discount_count": 0, "running_count": 0},
+                )
+                bucket["discount_count"] += 1
+                if is_running:
+                    bucket["running_count"] += 1
+
+        creators = []
+        if creator_agg:
+            u_rows = (
+                await self.db.execute(
+                    select(User.id, User.fullname, User.email, User.avatar).where(
+                        User.id.in_(list(creator_agg.keys()))
+                    )
+                )
+            ).all()
+            for uid, fullname, email, avatar in u_rows:
+                meta = creator_agg.get(uid, {})
+                creators.append(
+                    {
+                        "id": str(uid),
+                        "fullname": fullname or "Giảng viên",
+                        "email": email,
+                        "avatar": avatar,
+                        "discount_count": meta.get("discount_count", 0),
+                        "running_count": meta.get("running_count", 0),
+                    }
+                )
+            creators.sort(key=lambda x: (-x["discount_count"], x["fullname"]))
+
+        hist_row = (
+            await self.db.execute(
+                select(
+                    func.count(DiscountHistory.id),
+                    func.coalesce(func.sum(DiscountHistory.discounted_amount), 0),
+                )
+            )
+        ).one()
+
+        top_codes = sorted(
+            all_discounts, key=lambda x: int(x.usage_count or 0), reverse=True
+        )[:3]
+
+        return {
+            "total": len(all_discounts),
+            "running": running,
+            "upcoming": upcoming,
+            "expired": expired,
+            "inactive": inactive,
+            "admin_count": admin_count,
+            "lecturer_count": lecturer_count,
+            "lecturer_running": lecturer_running,
+            "lecturer_inactive": lecturer_inactive,
+            "creators": creators,
+            "total_redemptions": total_redemptions,
+            "history_records": int(hist_row[0] or 0),
+            "total_discounted_amount": float(hist_row[1] or 0),
+            "top_codes": [
+                {
+                    "id": str(d.id),
+                    "name": d.name,
+                    "code": d.discount_code,
+                    "created_role": d.created_role,
+                    "usage_count": int(d.usage_count or 0),
+                    "usage_limit": d.usage_limit,
+                }
+                for d in top_codes
+            ],
         }
